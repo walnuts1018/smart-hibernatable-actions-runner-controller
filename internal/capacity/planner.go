@@ -1,0 +1,36 @@
+package capacity
+
+import (
+	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
+)
+
+// MachineCapacity represents capacity and current status of a physical machine.
+type MachineCapacity struct {
+	Machine         *ghav1alpha1.RunnerMachine
+	Capacity        int
+	Priority        int32
+	Bootstrap       bool
+	PoweredOn       bool
+	Ready           bool
+	PowerManageable bool
+}
+
+// Plan represents the output of capacity planning.
+type Plan struct {
+	// SelectedMachines contains the physical machines that should be powered on.
+	SelectedMachines []*ghav1alpha1.RunnerMachine
+
+	// TotalCapacity is the sum of runner capacities from selected machines.
+	TotalCapacity int
+
+	// BootstrapRequired indicates whether a bootstrap machine is included in the selection.
+	BootstrapRequired bool
+
+	// MultiNodeViolated indicates if multi-node pool was encountered when MultiNode feature is disabled.
+	MultiNodeViolated bool
+}
+
+// CapacityPlanner calculates which machines should be powered on to satisfy demanded runner capacity.
+type CapacityPlanner interface {
+	Plan(machines []MachineCapacity, requiredRunners int) Plan
+}
