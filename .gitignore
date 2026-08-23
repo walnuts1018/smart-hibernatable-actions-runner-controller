@@ -1,4 +1,4 @@
-#バイナリおよびビルド成果物
+# バイナリおよびビルド成果物
 *.exe
 *.exe~
 *.dll
@@ -8,19 +8,19 @@ bin/
 dist/
 Dockerfile.cross
 
-#テスト成果物とカバレッジ
+# テスト成果物とカバレッジ
 *.test
 *.out
 coverage.*
 *.coverprofile
 profile.cov
 
-#Goワークスペースと依存関係
+# Goワークスペースと依存関係
 go.work
 go.work.sum
-#vendor/
+# vendor/
 
-#環境変数とローカル設定
+# 環境変数とローカル設定
 .env
 .env.*
 *.env
@@ -32,11 +32,11 @@ kubeconfig
 mise.local.toml
 .mise.*.local.toml
 
-#Helmパッケージ成果物
+# Helmパッケージ成果物
 charts/**/*.tgz
 charts/**/charts/
 
-#OS生成ファイル
+# OS生成ファイル
 .DS_Store
 .DS_Store?
 ._*
@@ -45,7 +45,7 @@ charts/**/charts/
 ehthumbs.db
 Thumbs.db
 
-#エディタおよびIDE
+# エディタおよびIDE
 .idea/
 *.iml
 *.iws
