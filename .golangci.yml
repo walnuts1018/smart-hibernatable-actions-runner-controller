@@ -46,6 +46,22 @@ linters:
     - unused
     - usestdlibvars
     - usetesting
+  exclusions:
+    rules:
+      - path: _test\.go$
+        linters:
+          - dupl
+          - goconst
+          - gocyclo
+          - unparam
+          - errcheck
+      - path: ^test/
+        linters:
+          - dupl
+          - goconst
+          - gocyclo
+          - unparam
+          - noctx
 formatters:
   enable:
     - gofmt
