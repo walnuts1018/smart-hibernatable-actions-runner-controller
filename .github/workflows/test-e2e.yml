@@ -18,21 +18,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup Go
-        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
-        with:
-          go-version-file: go.mod
-
-      - name: Install the latest version of kind
-        run: |
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-$(go env GOARCH)
-          chmod +x ./kind
-          sudo mv ./kind /usr/local/bin/kind
-
-      - name: Verify kind installation
-        run: kind version
+      - name: Setup mise
+        uses: jdx/mise-action@5083ab466144e5d5e236313175c5e8861d8ce4a7 # v2.1.13
 
       - name: Running Test e2e
         run: |
           go mod tidy
-          make test-e2e
+          mise run test-e2e

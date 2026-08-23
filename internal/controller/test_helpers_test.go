@@ -101,7 +101,7 @@ func (f *fakeScaleSetFactory) NewClient(configURL string, auth *scaleset.GitHubA
 }
 
 type fakeScaleSetClient struct {
-	scaleSetID        int64
+	scaleSetID         int64
 	scaleSetName       string
 	runnerGroup        string
 	getOrCreateErr     error

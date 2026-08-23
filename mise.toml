@@ -2,33 +2,126 @@
 "go:sigs.k8s.io/controller-tools/cmd/controller-gen" = "0.21.0"
 "go:sigs.k8s.io/controller-runtime/tools/setup-envtest" = "0.24.1"
 "go:sigs.k8s.io/kustomize/kustomize/v5" = "5.8.1"
+"go:github.com/golangci/golangci-lint/v2/cmd/golangci-lint" = "2.12.2"
 kind = "0.32.0"
 kubebuilder = "4.15.0"
 kubectl = "1.36.3"
 jq = "1.8.2"
-golangci-lint = "2.12.2"
 go = "1.27.0"
 shellcheck = "0.11.0"
 gh = "2.97.0"
 "npm:@devcontainers/cli" = "0.88.0"
 
+[tasks.manifests]
+description = "Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects"
+run = """
+controller-gen rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases output:webhook:artifacts:config=config/webhook output:rbac:artifacts:config=config/rbac
+cp config/crd/bases/*.yaml charts/smart-hibernatable-actions-runner-controller/crds/
+"""
+
+[tasks.generate]
+description = "Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations"
+run = "controller-gen object paths=\"./...\""
+
+[tasks.fmt]
+description = "Run go fmt against code"
+run = "go fmt ./..."
+
+[tasks.vet]
+description = "Run go vet against code"
+run = "go vet ./..."
+
 [tasks.test]
 description = "Run tests"
-run = "go test ./... -v"
+depends = ["manifests", "generate", "fmt", "vet"]
+run = 'KUBEBUILDER_ASSETS="$(setup-envtest use -p path)" go test $(go list ./... | grep -v /e2e) -coverprofile cover.out'
 
 [tasks.lint]
 description = "Run linter"
 run = "golangci-lint run ./..."
 
-[tasks.manifests]
-description = "Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects"
-run = "controller-gen rbac:roleName=manager-role crd webhook paths=\"./...\" output:crd:artifacts:config=config/crd/bases output:webhook:artifacts:config=config/webhook output:rbac:artifacts:config=config/rbac && cp config/crd/bases/*.yaml charts/smart-hibernatable-actions-runner-controller/crds/"
+[tasks.lint-fix]
+description = "Run linter and perform fixes"
+run = "golangci-lint run --fix ./..."
 
-[tasks.generate]
-description = "Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations"
-run = "controller-gen object:headerFile=\"hack/boilerplate.go.txt\",year=2026 paths=\"./...\""
+[tasks.lint-config]
+description = "Verify linter configuration"
+run = "golangci-lint config verify"
+
+[tasks.setup-test-e2e]
+description = "Set up a Kind cluster for e2e tests if it does not exist"
+run = """
+KIND_CLUSTER="${KIND_CLUSTER:-smart-hibernatable-actions-runner-controller-test-e2e}"
+if ! kind get clusters 2>/dev/null | grep -q "^${KIND_CLUSTER}$"; then
+  echo "Creating Kind cluster '${KIND_CLUSTER}'..."
+  kind create cluster --name "${KIND_CLUSTER}"
+else
+  echo "Kind cluster '${KIND_CLUSTER}' already exists. Skipping creation."
+fi
+"""
+
+[tasks.cleanup-test-e2e]
+description = "Tear down the Kind cluster used for e2e tests"
+run = 'kind delete cluster --name "${KIND_CLUSTER:-smart-hibernatable-actions-runner-controller-test-e2e}"'
+
+[tasks.test-e2e]
+description = "Run the e2e tests in Kind cluster"
+depends = ["setup-test-e2e", "manifests", "generate", "fmt", "vet"]
+run = """
+KIND_CLUSTER="${KIND_CLUSTER:-smart-hibernatable-actions-runner-controller-test-e2e}"
+trap 'mise run cleanup-test-e2e' EXIT
+KIND=kind KIND_CLUSTER="${KIND_CLUSTER}" go test -tags=e2e ./test/e2e/ -v -ginkgo.v
+"""
 
 [tasks.build]
 description = "Build manager and listener binaries"
+depends = ["manifests", "generate", "fmt", "vet"]
 run = "go build -o bin/manager cmd/main.go && go build -o bin/listener cmd/listener/main.go"
+
+[tasks.run]
+description = "Run a controller from host"
+depends = ["manifests", "generate", "fmt", "vet"]
+run = "go run ./cmd/main.go"
+
+[tasks.docker-build]
+description = "Build docker image with the manager"
+run = 'docker build -t "${IMG:-controller:latest}" .'
+
+[tasks.docker-push]
+description = "Push docker image with the manager"
+run = 'docker push "${IMG:-controller:latest}"'
+
+[tasks.build-installer]
+description = "Generate a consolidated YAML with CRDs and deployment"
+depends = ["manifests", "generate"]
+run = """
+IMG="${IMG:-controller:latest}"
+mkdir -p dist
+(cd config/manager && kustomize edit set image controller="${IMG}")
+kustomize build config/default > dist/install.yaml
+"""
+
+[tasks.install]
+description = "Install CRDs into the K8s cluster specified in ~/.kube/config"
+depends = ["manifests"]
+run = "kustomize build config/crd | kubectl apply -f -"
+
+[tasks.uninstall]
+description = "Uninstall CRDs from the K8s cluster specified in ~/.kube/config"
+depends = ["manifests"]
+run = 'kustomize build config/crd | kubectl delete --ignore-not-found="${IGNORE_NOT_FOUND:-false}" -f -'
+
+[tasks.deploy]
+description = "Deploy controller to the K8s cluster specified in ~/.kube/config"
+depends = ["manifests"]
+run = """
+IMG="${IMG:-controller:latest}"
+(cd config/manager && kustomize edit set image controller="${IMG}")
+kustomize build config/default | kubectl apply -f -
+"""
+
+[tasks.undeploy]
+description = "Undeploy controller from the K8s cluster specified in ~/.kube/config"
+run = 'kustomize build config/default | kubectl delete --ignore-not-found="${IGNORE_NOT_FOUND:-false}" -f -'
+
 
