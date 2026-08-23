@@ -35,6 +35,7 @@ func TestScalerHandler_HandleDesiredRunnerCount(t *testing.T) {
 	scaleSet.Spec.NodePoolRef.Name = "pool-1"
 	scaleSet.Spec.Scaling.MinRunners = 0
 	scaleSet.Spec.Scaling.MaxRunners = 10
+	scaleSet.Status.EffectiveMaxRunners = 4
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nodePool, machine, scaleSet).WithStatusSubresource(scaleSet).Build()
 	tracker := NewReadinessTracker()

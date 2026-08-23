@@ -23,6 +23,7 @@ const (
 	FinalizerScaleSetCleanup       = "gha.walnuts.dev/runner-scale-set"
 	IndexGitHubRunnerName          = "gha.walnuts.dev/github-runner-name"
 	DefaultContainerName           = "runner"
+	DefaultRunnerNamespace         = "gha-runners"
 )
 
 // GenerateRunnerName creates a unique runner name from the scale set name.
@@ -32,7 +33,9 @@ func GenerateRunnerName(scaleSetName string) string {
 		prefix = prefix[:48]
 	}
 	b := make([]byte, 4)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%s-%x", prefix, b)
+	}
 	return fmt.Sprintf("%s-%s", prefix, hex.EncodeToString(b))
 }
 

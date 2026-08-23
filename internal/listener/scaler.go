@@ -104,7 +104,9 @@ func (s *ScalerHandler) HandleJobStarted(ctx context.Context, jobInfo *scaleset.
 			return nil
 		case ghav1alpha1.EphemeralRunnerPhaseBusy:
 			// 既にBusy
-		default:
+		case ghav1alpha1.EphemeralRunnerPhasePending, ghav1alpha1.EphemeralRunnerPhaseWaitingForCluster,
+			ghav1alpha1.EphemeralRunnerPhaseProvisioning, ghav1alpha1.EphemeralRunnerPhaseStarting,
+			ghav1alpha1.EphemeralRunnerPhaseIdle:
 			epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseBusy
 		}
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	metav1apply "k8s.io/client-go/applyconfigurations/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -31,19 +30,7 @@ func controllerReference(owner client.Object, scheme *runtime.Scheme) (*metav1ap
 		WithController(true), nil
 }
 
-// applyResourceはApplyConfigurationをunstructuredに変換してServer-Side Applyを実行する
-func applyResource(ctx context.Context, c client.Client, applyConfig any) error {
-	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(applyConfig)
-	if err != nil {
-		return fmt.Errorf("failed to convert apply configuration to unstructured: %w", err)
-	}
-
-	patch := &unstructured.Unstructured{
-		Object: obj,
-	}
-
-	return c.Patch(ctx, patch, client.Apply, &client.PatchOptions{
-		FieldManager: FieldManagerName,
-		Force:        new(true),
-	})
+// applyResource executes Server-Side Apply for the given ApplyConfiguration
+func applyResource(ctx context.Context, c client.Client, applyConfig runtime.ApplyConfiguration) error {
+	return c.Apply(ctx, applyConfig, client.FieldOwner(FieldManagerName), client.ForceOwnership)
 }

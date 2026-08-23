@@ -19,7 +19,7 @@ import (
 	corev1apply "k8s.io/client-go/applyconfigurations/core/v1"
 	metav1apply "k8s.io/client-go/applyconfigurations/meta/v1"
 	rbacv1apply "k8s.io/client-go/applyconfigurations/rbac/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -37,7 +37,7 @@ import (
 type RunnerScaleSetReconciler struct {
 	client.Client
 	Scheme          *runtime.Scheme
-	Recorder        record.EventRecorder
+	Recorder        events.EventRecorder
 	ScaleSetFactory githubscaleset.ScaleSetClientFactory
 	ListenerImage   string
 }
@@ -66,86 +66,7 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// 1. Finalizer処理 (削除時: Drain-first)
 	if !scaleSet.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(&scaleSet, runner.FinalizerScaleSetCleanup) {
-			// 1.1 新規生成停止のため effectiveMaxRunners = 0 に設定
-			if scaleSet.Status.EffectiveMaxRunners != 0 {
-				scaleSet.Status.EffectiveMaxRunners = 0
-				r.updateStatus(ctx, &scaleSet, origScaleSet)
-			}
-
-			// 1.2 子 EphemeralRunner の一覧取得
-			var runnerList ghav1alpha1.EphemeralRunnerList
-			if err := r.List(ctx, &runnerList, client.InNamespace(scaleSet.Namespace), client.MatchingLabels{
-				runner.LabelScaleSetUID: string(scaleSet.UID),
-			}); err != nil {
-				return ctrl.Result{}, err
-			}
-
-			// 1.3 non-terminal な EphemeralRunner の残存確認 (Drain)
-			nonTerminalCount := 0
-			for i := range runnerList.Items {
-				if isRunnerNonTerminal(runnerList.Items[i].Status.Phase) {
-					nonTerminalCount++
-				}
-			}
-
-			if nonTerminalCount > 0 {
-				log.Info("waiting for non-terminal child ephemeral runners to drain before removing scale set", "nonTerminalCount", nonTerminalCount)
-				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-			}
-
-			// 1.4 non-terminal が 0 になったら、TTL 保持中の terminal CR を即座に削除 (Cascade Cleanup)
-			for i := range runnerList.Items {
-				er := &runnerList.Items[i]
-				if !isRunnerNonTerminal(er.Status.Phase) {
-					if err := r.Delete(ctx, er); err != nil && !apierrors.IsNotFound(err) {
-						log.Error(err, "failed to delete terminal child ephemeral runner", "runner", er.Name)
-						return ctrl.Result{}, err
-					}
-				}
-			}
-
-			if len(runnerList.Items) > 0 {
-				log.Info("waiting for child ephemeral runner CRs to be deleted", "count", len(runnerList.Items))
-				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
-			}
-
-			// 1.5 Listener Deployment の停止/削除 (active session を閉じて 409 を防止)
-			var deploy appsv1.Deployment
-			deployKey := client.ObjectKey{Namespace: scaleSet.Namespace, Name: fmt.Sprintf("%s-listener", scaleSet.Name)}
-			if err := r.Get(ctx, deployKey, &deploy); err == nil {
-				if err := r.Delete(ctx, &deploy); err != nil && !apierrors.IsNotFound(err) {
-					log.Error(err, "failed to delete listener deployment before scaleset cleanup")
-					return ctrl.Result{}, err
-				}
-			}
-
-			// 1.6 GitHub Actions ScaleSet 削除
-			orphanOverride := scaleSet.Annotations != nil && scaleSet.Annotations[runner.AnnotationOrphanGitHubResource] == "true"
-			if scaleSet.Status.ScaleSetID != 0 && !orphanOverride {
-				log.Info("deleting runner scale set from GitHub Actions", "scaleSetID", scaleSet.Status.ScaleSetID)
-				ghaClient, err := r.getGitHubClient(ctx, &scaleSet)
-				if err != nil {
-					log.Error(err, "failed to get github client during scale set deletion; retention required unless orphan-github-resource override is set")
-					conditions.SetCondition(&scaleSet.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonGitHubAuthFailed, "Cannot delete GitHub ScaleSet: credentials missing")
-					r.updateStatus(ctx, &scaleSet, origScaleSet)
-					return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-				}
-
-				if err := ghaClient.DeleteScaleSet(ctx, scaleSet.Status.ScaleSetID); err != nil {
-					log.Error(err, "failed to delete scale set in GitHub", "scaleSetID", scaleSet.Status.ScaleSetID)
-					conditions.SetCondition(&scaleSet.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonScaleSetFailed, fmt.Sprintf("Failed to delete scale set in GitHub: %v", err))
-					r.updateStatus(ctx, &scaleSet, origScaleSet)
-					return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-				}
-			}
-
-			controllerutil.RemoveFinalizer(&scaleSet, runner.FinalizerScaleSetCleanup)
-			if err := r.Update(ctx, &scaleSet); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		return ctrl.Result{}, nil
+		return r.reconcileDeletion(ctx, &scaleSet, origScaleSet)
 	}
 
 	// Finalizer確保
@@ -160,7 +81,9 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// 2. GitHub ScaleSet の同期
 	if err := r.reconcileGitHub(ctx, &scaleSet); err != nil {
 		log.Error(err, "failed to reconcile GitHub ScaleSet")
-		r.updateStatus(ctx, &scaleSet, origScaleSet)
+		if updateErr := r.updateStatus(ctx, &scaleSet, origScaleSet); updateErr != nil {
+			log.Error(updateErr, "failed to update status")
+		}
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
@@ -168,21 +91,27 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	declaredCapacity, err := r.reconcileCapacity(ctx, &scaleSet)
 	if err != nil {
 		log.Error(err, "failed to reconcile capacity")
-		r.updateStatus(ctx, &scaleSet, origScaleSet)
+		if updateErr := r.updateStatus(ctx, &scaleSet, origScaleSet); updateErr != nil {
+			log.Error(updateErr, "failed to update status")
+		}
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
 	// 4. Listener 関連リソースの Server-Side Apply
 	if err := r.reconcileListener(ctx, &scaleSet); err != nil {
 		log.Error(err, "failed to reconcile listener resources")
-		r.updateStatus(ctx, &scaleSet, origScaleSet)
+		if updateErr := r.updateStatus(ctx, &scaleSet, origScaleSet); updateErr != nil {
+			log.Error(updateErr, "failed to update status")
+		}
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
 	// 5. EphemeralRunner リソースの Reconciliation
 	if err := r.reconcileRunners(ctx, &scaleSet, declaredCapacity); err != nil {
 		log.Error(err, "failed to reconcile ephemeral runners")
-		r.updateStatus(ctx, &scaleSet, origScaleSet)
+		if updateErr := r.updateStatus(ctx, &scaleSet, origScaleSet); updateErr != nil {
+			log.Error(updateErr, "failed to update status")
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -204,6 +133,103 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
+func (r *RunnerScaleSetReconciler) reconcileDeletion(
+	ctx context.Context,
+	scaleSet, origScaleSet *ghav1alpha1.RunnerScaleSet,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	if !controllerutil.ContainsFinalizer(scaleSet, runner.FinalizerScaleSetCleanup) {
+		return ctrl.Result{}, nil
+	}
+
+	// 1.1 新規生成停止のため effectiveMaxRunners = 0 に設定
+	if scaleSet.Status.EffectiveMaxRunners != 0 {
+		scaleSet.Status.EffectiveMaxRunners = 0
+		if updateErr := r.updateStatus(ctx, scaleSet, origScaleSet); updateErr != nil {
+			log.Error(updateErr, "failed to update status")
+		}
+	}
+
+	// 1.2 子 EphemeralRunner の一覧取得
+	var runnerList ghav1alpha1.EphemeralRunnerList
+	if err := r.List(ctx, &runnerList, client.InNamespace(scaleSet.Namespace), client.MatchingLabels{
+		runner.LabelScaleSetUID: string(scaleSet.UID),
+	}); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// 1.3 non-terminal な EphemeralRunner の残存確認 (Drain)
+	nonTerminalCount := 0
+	for i := range runnerList.Items {
+		if isRunnerNonTerminal(runnerList.Items[i].Status.Phase) {
+			nonTerminalCount++
+		}
+	}
+
+	if nonTerminalCount > 0 {
+		log.Info("waiting for non-terminal child ephemeral runners to drain before removing scale set", "nonTerminalCount", nonTerminalCount)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
+	// 1.4 non-terminal が 0 になったら、TTL 保持中の terminal CR を即座に削除 (Cascade Cleanup)
+	for i := range runnerList.Items {
+		er := &runnerList.Items[i]
+		if !isRunnerNonTerminal(er.Status.Phase) {
+			if err := r.Delete(ctx, er); err != nil && !apierrors.IsNotFound(err) {
+				log.Error(err, "failed to delete terminal child ephemeral runner", "runner", er.Name)
+				return ctrl.Result{}, err
+			}
+		}
+	}
+
+	if len(runnerList.Items) > 0 {
+		log.Info("waiting for child ephemeral runner CRs to be deleted", "count", len(runnerList.Items))
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
+
+	// 1.5 Listener Deployment の停止/削除 (active session を閉じて 409 を防止)
+	var deploy appsv1.Deployment
+	deployKey := client.ObjectKey{Namespace: scaleSet.Namespace, Name: fmt.Sprintf("%s-listener", scaleSet.Name)}
+	if err := r.Get(ctx, deployKey, &deploy); err == nil {
+		if err := r.Delete(ctx, &deploy); err != nil && !apierrors.IsNotFound(err) {
+			log.Error(err, "failed to delete listener deployment before scaleset cleanup")
+			return ctrl.Result{}, err
+		}
+	}
+
+	// 1.6 GitHub Actions ScaleSet 削除
+	orphanOverride := scaleSet.Annotations != nil && scaleSet.Annotations[runner.AnnotationOrphanGitHubResource] == "true"
+	if scaleSet.Status.ScaleSetID != 0 && !orphanOverride {
+		log.Info("deleting runner scale set from GitHub Actions", "scaleSetID", scaleSet.Status.ScaleSetID)
+		ghaClient, err := r.getGitHubClient(ctx, scaleSet)
+		if err != nil {
+			log.Error(err, "failed to get github client during scale set deletion; retention required unless orphan-github-resource override is set")
+			conditions.SetCondition(&scaleSet.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonGitHubAuthFailed, "Cannot delete GitHub ScaleSet: credentials missing")
+			if updateErr := r.updateStatus(ctx, scaleSet, origScaleSet); updateErr != nil {
+				log.Error(updateErr, "failed to update status")
+			}
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+
+		if err := ghaClient.DeleteScaleSet(ctx, scaleSet.Status.ScaleSetID); err != nil {
+			log.Error(err, "failed to delete scale set in GitHub", "scaleSetID", scaleSet.Status.ScaleSetID)
+			conditions.SetCondition(&scaleSet.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonScaleSetFailed, fmt.Sprintf("Failed to delete scale set in GitHub: %v", err))
+			if updateErr := r.updateStatus(ctx, scaleSet, origScaleSet); updateErr != nil {
+				log.Error(updateErr, "failed to update status")
+			}
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		}
+	}
+
+	controllerutil.RemoveFinalizer(scaleSet, runner.FinalizerScaleSetCleanup)
+	if err := r.Update(ctx, scaleSet); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
 func (r *RunnerScaleSetReconciler) updateStatus(ctx context.Context, ss, orig *ghav1alpha1.RunnerScaleSet) error {
 	return r.Status().Patch(ctx, ss, client.MergeFrom(orig))
 }
@@ -212,7 +238,7 @@ func (r *RunnerScaleSetReconciler) reconcileGitHub(ctx context.Context, ss *ghav
 	ghaClient, err := r.getGitHubClient(ctx, ss)
 	if err != nil {
 		if r.Recorder != nil {
-			r.Recorder.Eventf(ss, corev1.EventTypeWarning, "GitHubAuthFailed", "Failed to authenticate with GitHub App: %v", err)
+			r.Recorder.Eventf(ss, nil, corev1.EventTypeWarning, "GitHubAuthFailed", "Reconcile", "Failed to authenticate with GitHub App: %v", err)
 		}
 		conditions.SetCondition(&ss.Status.Conditions, conditions.TypeGitHubReady, metav1.ConditionFalse, conditions.ReasonGitHubAuthFailed, err.Error())
 		conditions.SetCondition(&ss.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, "GitHub client auth failed")
@@ -222,7 +248,7 @@ func (r *RunnerScaleSetReconciler) reconcileGitHub(ctx context.Context, ss *ghav
 	scaleSetID, err := ghaClient.GetOrCreateScaleSet(ctx, ss.Spec.GitHub.ScaleSetName, ss.Spec.GitHub.RunnerGroup)
 	if err != nil {
 		if r.Recorder != nil {
-			r.Recorder.Eventf(ss, corev1.EventTypeWarning, "ScaleSetFailed", "Failed to ensure scale set in GitHub: %v", err)
+			r.Recorder.Eventf(ss, nil, corev1.EventTypeWarning, "ScaleSetFailed", "Reconcile", "Failed to ensure scale set in GitHub: %v", err)
 		}
 		conditions.SetCondition(&ss.Status.Conditions, conditions.TypeGitHubReady, metav1.ConditionFalse, conditions.ReasonScaleSetFailed, err.Error())
 		conditions.SetCondition(&ss.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, "Failed to create scale set in GitHub")
@@ -232,7 +258,7 @@ func (r *RunnerScaleSetReconciler) reconcileGitHub(ctx context.Context, ss *ghav
 	if ss.Status.ScaleSetID != scaleSetID {
 		ss.Status.ScaleSetID = scaleSetID
 		if r.Recorder != nil {
-			r.Recorder.Eventf(ss, corev1.EventTypeNormal, "ScaleSetRegistered", "Registered RunnerScaleSet in GitHub Actions with ID %d", scaleSetID)
+			r.Recorder.Eventf(ss, nil, corev1.EventTypeNormal, "ScaleSetRegistered", "Reconcile", "Registered RunnerScaleSet in GitHub Actions with ID %d", scaleSetID)
 		}
 	}
 	conditions.SetCondition(&ss.Status.Conditions, conditions.TypeGitHubReady, metav1.ConditionTrue, conditions.ReasonScaleSetCreated, "ScaleSet is registered in GitHub Actions")
@@ -243,7 +269,7 @@ func (r *RunnerScaleSetReconciler) reconcileCapacity(ctx context.Context, ss *gh
 	var nodePool ghav1alpha1.RunnerNodePool
 	if err := r.Get(ctx, client.ObjectKey{Namespace: ss.Namespace, Name: ss.Spec.NodePoolRef.Name}, &nodePool); err != nil {
 		if r.Recorder != nil {
-			r.Recorder.Eventf(ss, corev1.EventTypeWarning, "NodePoolNotFound", "Referenced NodePool %s not found: %v", ss.Spec.NodePoolRef.Name, err)
+			r.Recorder.Eventf(ss, nil, corev1.EventTypeWarning, "NodePoolNotFound", "Reconcile", "Referenced NodePool %s not found: %v", ss.Spec.NodePoolRef.Name, err)
 		}
 		conditions.SetCondition(&ss.Status.Conditions, conditions.TypeCapacityReady, metav1.ConditionFalse, conditions.ReasonNotReady, fmt.Sprintf("NodePool %s not found", ss.Spec.NodePoolRef.Name))
 		return 0, err
@@ -254,7 +280,7 @@ func (r *RunnerScaleSetReconciler) reconcileCapacity(ctx context.Context, ss *gh
 
 	if ss.Spec.Scaling.MaxRunners > declaredCapacity {
 		if r.Recorder != nil {
-			r.Recorder.Eventf(ss, corev1.EventTypeWarning, "CapacityExceeded", "MaxRunners (%d) exceeds NodePool declared capacity (%d)", ss.Spec.Scaling.MaxRunners, declaredCapacity)
+			r.Recorder.Eventf(ss, nil, corev1.EventTypeWarning, "CapacityExceeded", "Reconcile", "MaxRunners (%d) exceeds NodePool declared capacity (%d)", ss.Spec.Scaling.MaxRunners, declaredCapacity)
 		}
 		conditions.SetCondition(&ss.Status.Conditions, conditions.TypeCapacityLimited, metav1.ConditionTrue, conditions.ReasonCapacityExceeded, "MaxRunners exceeds NodePool declared capacity")
 	} else {
@@ -309,7 +335,7 @@ func (r *RunnerScaleSetReconciler) reconcileListener(ctx context.Context, ss *gh
 
 func (r *RunnerScaleSetReconciler) recordListenerError(ss *ghav1alpha1.RunnerScaleSet, err error) {
 	if r.Recorder != nil {
-		r.Recorder.Eventf(ss, corev1.EventTypeWarning, "ListenerFailed", "Failed to ensure listener resources: %v", err)
+		r.Recorder.Eventf(ss, nil, corev1.EventTypeWarning, "ListenerFailed", "Reconcile", "Failed to ensure listener resources: %v", err)
 	}
 	conditions.SetCondition(&ss.Status.Conditions, conditions.TypeListenerReady, metav1.ConditionFalse, conditions.ReasonListenerNotRunning, err.Error())
 }
@@ -631,7 +657,7 @@ func (r *RunnerScaleSetReconciler) reconcileRunners(ctx context.Context, ss *gha
 		diff := targetRunners - int32(len(activeRunners))
 		log.Info("scaling up ephemeral runners", "count", diff)
 		if r.Recorder != nil {
-			r.Recorder.Eventf(ss, corev1.EventTypeNormal, "ScalingUp", "Scaling up %d ephemeral runner(s) (target: %d, active: %d)", diff, targetRunners, len(activeRunners))
+			r.Recorder.Eventf(ss, nil, corev1.EventTypeNormal, "ScalingUp", "Reconcile", "Scaling up %d ephemeral runner(s) (target: %d, active: %d)", diff, targetRunners, len(activeRunners))
 		}
 		for range diff {
 			runnerName := runner.GenerateRunnerName(ss.Name)
@@ -676,7 +702,7 @@ func (r *RunnerScaleSetReconciler) reconcileRunners(ctx context.Context, ss *gha
 				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseIdle {
 				log.Info("scaling down surplus ephemeral runner", "runner", run.Name)
 				if r.Recorder != nil {
-					r.Recorder.Eventf(ss, corev1.EventTypeNormal, "ScalingDown", "Scaling down surplus ephemeral runner %s", run.Name)
+					r.Recorder.Eventf(ss, nil, corev1.EventTypeNormal, "ScalingDown", "Reconcile", "Scaling down surplus ephemeral runner %s", run.Name)
 				}
 				if err := r.Delete(ctx, run); err == nil {
 					deleted++
@@ -729,29 +755,29 @@ func (r *RunnerScaleSetReconciler) findScaleSetsForNodePool(ctx context.Context,
 		IndexNodePoolRefName: nodePool.Name,
 	}); err != nil {
 		// インデックスが未登録の場合はフォールバック
-		if err := r.List(ctx, &scaleSets, client.InNamespace(nodePool.Namespace)); err != nil {
+		if listErr := r.List(ctx, &scaleSets, client.InNamespace(nodePool.Namespace)); listErr != nil {
 			return nil
 		}
-		var requests []ctrl.Request
+		var reqs []ctrl.Request
 		for _, ss := range scaleSets.Items {
 			if ss.Spec.NodePoolRef.Name == nodePool.Name {
-				requests = append(requests, ctrl.Request{
+				reqs = append(reqs, ctrl.Request{
 					Namespace: ss.Namespace,
 					Name:      ss.Name,
 				})
 			}
 		}
-		return requests
+		return reqs
 	}
 
-	var requests []ctrl.Request
+	reqs := make([]ctrl.Request, 0, len(scaleSets.Items))
 	for _, ss := range scaleSets.Items {
-		requests = append(requests, ctrl.Request{
+		reqs = append(reqs, ctrl.Request{
 			Namespace: ss.Namespace,
 			Name:      ss.Name,
 		})
 	}
-	return requests
+	return reqs
 }
 
 // SetupWithManager sets up the controller with the Manager.

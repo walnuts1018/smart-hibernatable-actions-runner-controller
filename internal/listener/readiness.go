@@ -77,17 +77,23 @@ func StartHTTPServer(ctx context.Context, probeAddr, metricsAddr string, tracker
 	// Liveness probe:プロセスが生存していれば200OK
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		if _, err := w.Write([]byte("ok")); err != nil {
+			readinessLogger.Error(err, "failed to write healthz response")
+		}
 	})
 
 	// Readiness probe:全条件が揃っている場合のみ200OK
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
 		if tracker.IsReady() {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("ready"))
+			if _, err := w.Write([]byte("ready")); err != nil {
+				readinessLogger.Error(err, "failed to write readyz response")
+			}
 		} else {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte("not ready"))
+			if _, err := w.Write([]byte("not ready")); err != nil {
+				readinessLogger.Error(err, "failed to write readyz response")
+			}
 		}
 	})
 
@@ -128,9 +134,13 @@ func StartHTTPServer(ctx context.Context, probeAddr, metricsAddr string, tracker
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		probeServer.Shutdown(shutdownCtx)
+		if err := probeServer.Shutdown(shutdownCtx); err != nil {
+			readinessLogger.Error(err, "failed to shutdown probe server")
+		}
 		if metricsServer != nil {
-			metricsServer.Shutdown(shutdownCtx)
+			if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+				readinessLogger.Error(err, "failed to shutdown metrics server")
+			}
 		}
 	}()
 

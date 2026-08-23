@@ -4,6 +4,7 @@ import (
 	"context"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/actions/scaleset"
@@ -51,7 +52,9 @@ func (m *metricsRecorderImpl) RecordStatistics(statistics *scaleset.RunnerScaleS
 			ss.Status.GitHub.LastStatisticsTime = &now
 			ss.Status.Listener.LastPollTime = &now
 			ss.Status.Listener.Ready = true
-			m.client.Status().Patch(ctx, &ss, client.MergeFrom(orig))
+			if err := m.client.Status().Patch(ctx, &ss, client.MergeFrom(orig)); err != nil {
+				ctrl.Log.WithName("githubscaleset-metrics").Error(err, "failed to patch runner scale set status from statistics", "scaleSet", m.name)
+			}
 		}
 	}
 }

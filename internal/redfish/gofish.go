@@ -172,8 +172,7 @@ func (c *gofishController) PowerOn(ctx context.Context) error {
 		_, err := sys.Reset(schemas.OnResetType)
 		if err != nil {
 			// Observe-Act-Observe: エラーでも現在の状態を再確認
-			sys.Update()
-			if sys.PowerState == schemas.OnPowerState || sys.PowerState == schemas.PoweringOnPowerState {
+			if updateErr := sys.Update(); updateErr == nil && (sys.PowerState == schemas.OnPowerState || sys.PowerState == schemas.PoweringOnPowerState) {
 				return nil
 			}
 			return err
@@ -192,7 +191,10 @@ func (c *gofishController) GracefulShutdown(ctx context.Context) error {
 		}
 
 		// SupportedResetTypes (AllowableValues) を確認して最適なResetTypeを選択
-		supportedTypes, _ := sys.GetSupportedResetTypes()
+		supportedTypes, suppErr := sys.GetSupportedResetTypes()
+		if suppErr != nil {
+			supportedTypes = nil
+		}
 		hasGraceful := false
 		hasPushButton := false
 		for _, rt := range supportedTypes {

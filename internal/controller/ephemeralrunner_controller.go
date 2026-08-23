@@ -9,7 +9,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	crcontroller "sigs.k8s.io/controller-runtime/pkg/controller"
@@ -28,7 +28,7 @@ import (
 type EphemeralRunnerReconciler struct {
 	client.Client
 	Scheme          *runtime.Scheme
-	Recorder        record.EventRecorder
+	Recorder        events.EventRecorder
 	RemoteProvider  remotecluster.Provider
 	ScaleSetFactory githubscaleset.ScaleSetClientFactory
 }
@@ -54,29 +54,7 @@ func (r *EphemeralRunnerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// 1.Finalizer処理（親リソースが削除済みでも安全にFinalizerを除去できるように先行判定）
 	if !epRunner.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(&epRunner, runner.FinalizerRunnerCleanup) {
-			log.Info("cleaning up remote resources for runner", "runner", epRunner.Name)
-			var scaleSet ghav1alpha1.RunnerScaleSet
-			if err := r.Get(ctx, client.ObjectKey{Namespace: epRunner.Namespace, Name: epRunner.Spec.ScaleSetRef.Name}, &scaleSet); err == nil {
-				var nodePool ghav1alpha1.RunnerNodePool
-				if err := r.Get(ctx, client.ObjectKey{Namespace: scaleSet.Namespace, Name: scaleSet.Spec.NodePoolRef.Name}, &nodePool); err == nil {
-					var cluster ghav1alpha1.RunnerCluster
-					if err := r.Get(ctx, client.ObjectKey{Namespace: nodePool.Namespace, Name: nodePool.Spec.ClusterRef.Name}, &cluster); err == nil {
-						runnerNs := cluster.Spec.RunnerNamespace
-						if runnerNs == "" {
-							runnerNs = "gha-runners"
-						}
-						r.cleanupRemoteResources(ctx, &cluster, runnerNs, &epRunner)
-					}
-				}
-			}
-
-			controllerutil.RemoveFinalizer(&epRunner, runner.FinalizerRunnerCleanup)
-			if err := r.Update(ctx, &epRunner); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		return ctrl.Result{}, nil
+		return r.reconcileDeletion(ctx, &epRunner)
 	}
 
 	// 2.Finalizer確保
@@ -110,7 +88,7 @@ func (r *EphemeralRunnerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	runnerNs := cluster.Spec.RunnerNamespace
 	if runnerNs == "" {
-		runnerNs = "gha-runners"
+		runnerNs = runner.DefaultRunnerNamespace
 	}
 
 	// 5.Lifecycle state machine
@@ -120,7 +98,9 @@ func (r *EphemeralRunnerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if cluster.Status.Phase != ghav1alpha1.RunnerClusterPhaseReady || !cluster.Status.APIReachable || nodePool.Status.ReadyNodes == 0 {
 			epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseWaitingForCluster
 			conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonPending, "Waiting for runner cluster and physical node readiness")
-			r.updateStatus(ctx, &epRunner, origRunner)
+			if updateErr := r.updateStatus(ctx, &epRunner, origRunner); updateErr != nil {
+				log.Error(updateErr, "failed to update status")
+			}
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
 
@@ -139,47 +119,104 @@ func (r *EphemeralRunnerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return r.reconcileRunning(ctx, &epRunner, origRunner, &scaleSet, &cluster, runnerNs)
 
 	case ghav1alpha1.EphemeralRunnerPhaseCompleted:
-		r.cleanupRemoteResources(ctx, &cluster, runnerNs, &epRunner)
-		retention := 10 * time.Minute
-		if epRunner.Status.FinishedAt != nil {
-			elapsed := time.Since(epRunner.Status.FinishedAt.Time)
-			if elapsed >= retention {
-				log.Info("deleting expired completed ephemeral runner CR", "runner", epRunner.Name)
-				if err := r.Delete(ctx, &epRunner); err != nil {
-					log.Error(err, "failed to delete expired completed ephemeral runner CR")
-					return ctrl.Result{}, err
-				}
-				return ctrl.Result{}, nil
-			}
-			return ctrl.Result{RequeueAfter: retention - elapsed}, nil
-		}
-		now := metav1.Now()
-		epRunner.Status.FinishedAt = &now
-		r.updateStatus(ctx, &epRunner, origRunner)
-		return ctrl.Result{RequeueAfter: retention}, nil
+		return r.reconcileCompleted(ctx, &epRunner, origRunner, &cluster, runnerNs)
 
 	case ghav1alpha1.EphemeralRunnerPhaseFailed:
-		r.cleanupRemoteResources(ctx, &cluster, runnerNs, &epRunner)
-		// Failed CRはトラブルシュート用に1時間保持したのち自動削除 (TTL GC)
-		retention := 1 * time.Hour
-		if epRunner.Status.FinishedAt != nil {
-			elapsed := time.Since(epRunner.Status.FinishedAt.Time)
-			if elapsed >= retention {
-				log.Info("deleting expired failed ephemeral runner CR", "runner", epRunner.Name)
-				if err := r.Delete(ctx, &epRunner); err != nil {
-					log.Error(err, "failed to delete expired failed ephemeral runner CR")
-					return ctrl.Result{}, err
-				}
-				return ctrl.Result{}, nil
-			}
-			return ctrl.Result{RequeueAfter: retention - elapsed}, nil
-		}
-		if err := r.Delete(ctx, &epRunner); err != nil {
-			log.Error(err, "failed to delete failed ephemeral runner CR")
-		}
-		return ctrl.Result{}, nil
+		return r.reconcileFailed(ctx, &epRunner, &cluster, runnerNs)
+
+	case ghav1alpha1.EphemeralRunnerPhaseDeleting:
+		return r.reconcileDeletion(ctx, &epRunner)
 	}
 
+	return ctrl.Result{}, nil
+}
+
+func (r *EphemeralRunnerReconciler) reconcileDeletion(ctx context.Context, epRunner *ghav1alpha1.EphemeralRunner) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	if controllerutil.ContainsFinalizer(epRunner, runner.FinalizerRunnerCleanup) {
+		log.Info("cleaning up remote resources for runner", "runner", epRunner.Name)
+		var scaleSet ghav1alpha1.RunnerScaleSet
+		if err := r.Get(ctx, client.ObjectKey{Namespace: epRunner.Namespace, Name: epRunner.Spec.ScaleSetRef.Name}, &scaleSet); err == nil {
+			var nodePool ghav1alpha1.RunnerNodePool
+			if err := r.Get(ctx, client.ObjectKey{Namespace: scaleSet.Namespace, Name: scaleSet.Spec.NodePoolRef.Name}, &nodePool); err == nil {
+				var cluster ghav1alpha1.RunnerCluster
+				if err := r.Get(ctx, client.ObjectKey{Namespace: nodePool.Namespace, Name: nodePool.Spec.ClusterRef.Name}, &cluster); err == nil {
+					runnerNs := cluster.Spec.RunnerNamespace
+					if runnerNs == "" {
+						runnerNs = runner.DefaultRunnerNamespace
+					}
+					if cleanupErr := r.cleanupRemoteResources(ctx, &cluster, runnerNs, epRunner); cleanupErr != nil {
+						log.Error(cleanupErr, "failed to cleanup remote resources during deletion")
+					}
+				}
+			}
+		}
+
+		controllerutil.RemoveFinalizer(epRunner, runner.FinalizerRunnerCleanup)
+		if err := r.Update(ctx, epRunner); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	return ctrl.Result{}, nil
+}
+
+func (r *EphemeralRunnerReconciler) reconcileCompleted(
+	ctx context.Context,
+	epRunner, origRunner *ghav1alpha1.EphemeralRunner,
+	cluster *ghav1alpha1.RunnerCluster,
+	runnerNs string,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	if cleanupErr := r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner); cleanupErr != nil {
+		log.Error(cleanupErr, "failed to cleanup remote resources")
+	}
+	retention := 10 * time.Minute
+	if epRunner.Status.FinishedAt != nil {
+		elapsed := time.Since(epRunner.Status.FinishedAt.Time)
+		if elapsed >= retention {
+			log.Info("deleting expired completed ephemeral runner CR", "runner", epRunner.Name)
+			if err := r.Delete(ctx, epRunner); err != nil {
+				log.Error(err, "failed to delete expired completed ephemeral runner CR")
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{RequeueAfter: retention - elapsed}, nil
+	}
+	now := metav1.Now()
+	epRunner.Status.FinishedAt = &now
+	if updateErr := r.updateStatus(ctx, epRunner, origRunner); updateErr != nil {
+		log.Error(updateErr, "failed to update status")
+	}
+	return ctrl.Result{RequeueAfter: retention}, nil
+}
+
+func (r *EphemeralRunnerReconciler) reconcileFailed(
+	ctx context.Context,
+	epRunner *ghav1alpha1.EphemeralRunner,
+	cluster *ghav1alpha1.RunnerCluster,
+	runnerNs string,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	if cleanupErr := r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner); cleanupErr != nil {
+		log.Error(cleanupErr, "failed to cleanup remote resources")
+	}
+	retention := 1 * time.Hour
+	if epRunner.Status.FinishedAt != nil {
+		elapsed := time.Since(epRunner.Status.FinishedAt.Time)
+		if elapsed >= retention {
+			log.Info("deleting expired failed ephemeral runner CR", "runner", epRunner.Name)
+			if err := r.Delete(ctx, epRunner); err != nil {
+				log.Error(err, "failed to delete expired failed ephemeral runner CR")
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{RequeueAfter: retention - elapsed}, nil
+	}
+	if err := r.Delete(ctx, epRunner); err != nil {
+		log.Error(err, "failed to delete failed ephemeral runner CR")
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -201,94 +238,35 @@ func (r *EphemeralRunnerReconciler) reconcileProvisioning(ctx context.Context, e
 		if err := r.updateStatus(ctx, epRunner, origRunner); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 
 	remoteClient, err := r.RemoteProvider.GetClient(ctx, cluster)
 	if err != nil {
 		log.Error(err, "failed to get client for remote cluster")
 		conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, err.Error())
-		r.updateStatus(ctx, epRunner, origRunner)
+		if updateErr := r.updateStatus(ctx, epRunner, origRunner); updateErr != nil {
+			log.Error(updateErr, "failed to update status")
+		}
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	// 2. Remote JIT Secret の存在確認（Checkpoint）
-	secretName := runner.JitSecretName(epRunner.Spec.RunnerName)
-	var existingSecret corev1.Secret
-	err = remoteClient.Get(ctx, client.ObjectKey{Namespace: runnerNs, Name: secretName}, &existingSecret)
-	if err != nil && !apierrors.IsNotFound(err) {
-		log.Error(err, "failed to check existing remote JIT secret")
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	jitRes, err := r.ensureJitSecret(ctx, remoteClient, epRunner, origRunner, scaleSet, runnerNs)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
-
-	if apierrors.IsNotFound(err) {
-		ghaClient, err := r.getGitHubClient(ctx, scaleSet)
-		if err != nil {
-			log.Error(err, "failed to get github client for JIT config generation")
-			conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonFailed, err.Error())
-			r.updateStatus(ctx, epRunner, origRunner)
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		}
-
-		// クラッシュリカバリ: 既にGitHub側にRunnerが残存しているか確認し、あればRemoveして再生成
-		existingRunner, getErr := ghaClient.GetRunnerByName(ctx, epRunner.Status.Provisioning.RunnerName)
-		if getErr == nil && existingRunner != nil {
-			log.Info("found existing orphaned runner on GitHub from previous failed attempt, cleaning up", "runnerName", epRunner.Status.Provisioning.RunnerName, "runnerID", existingRunner.ID)
-			ghaClient.RemoveRunner(ctx, int64(existingRunner.ID))
-		}
-
-		jitResp, err := ghaClient.GenerateJITConfig(ctx, scaleSet.Status.ScaleSetID, epRunner.Status.Provisioning.RunnerName, scaleSet.Spec.Runner.WorkDir)
-		if err != nil {
-			log.Error(err, "failed to generate JIT runner config")
-			if r.Recorder != nil {
-				r.Recorder.Eventf(epRunner, corev1.EventTypeWarning, "JITConfigFailed", "Failed to generate JIT runner config: %v", err)
-			}
-			epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseFailed
-			conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonFailed, err.Error())
-			r.updateStatus(ctx, epRunner, origRunner)
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		}
-
-		now := metav1.Now()
-		epRunner.Status.Provisioning.RunnerID = jitResp.RunnerID
-		epRunner.Status.Provisioning.JITGeneratedAt = &now
-
-		jitSecret := runner.BuildJitSecret(runnerNs, epRunner, jitResp.EncodedJITConfig)
-		if err := remoteClient.Create(ctx, jitSecret); err != nil && !apierrors.IsAlreadyExists(err) {
-			log.Error(err, "failed to create JIT secret on remote cluster; removing runner from GitHub as compensation")
-			if jitResp.RunnerID != 0 {
-				ghaClient.RemoveRunner(context.WithoutCancel(ctx), jitResp.RunnerID)
-			}
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-		}
-	} else {
-		// 既存Secretが存在する場合、LabelのRunner UIDを確認して安全性を担保
-		if existingSecret.Labels[runner.LabelRunnerUID] != "" && existingSecret.Labels[runner.LabelRunnerUID] != string(epRunner.UID) {
-			return ctrl.Result{}, fmt.Errorf("remote JIT secret %s exists with different runner UID", secretName)
-		}
+	if jitRes != nil {
+		return *jitRes, nil
 	}
 
 	// 3. Remote Runner Podの存在確認
-	var existingPod corev1.Pod
-	err = remoteClient.Get(ctx, client.ObjectKey{Namespace: runnerNs, Name: epRunner.Spec.RunnerName}, &existingPod)
-	if err != nil && !apierrors.IsNotFound(err) {
-		log.Error(err, "failed to check existing remote runner pod")
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	podRes, err := r.ensureRunnerPod(ctx, remoteClient, epRunner, scaleSet, runnerNs)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
-
-	if apierrors.IsNotFound(err) {
-		pod := runner.BuildRunnerPod(runnerNs, scaleSet, epRunner)
-		if err := remoteClient.Create(ctx, pod); err != nil && !apierrors.IsAlreadyExists(err) {
-			log.Error(err, "failed to create runner pod on remote cluster")
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-		}
-		if r.Recorder != nil {
-			r.Recorder.Eventf(epRunner, corev1.EventTypeNormal, "Provisioned", "Created remote runner Pod %s and JIT Secret in namespace %s", pod.Name, runnerNs)
-		}
-	} else {
-		if existingPod.Labels[runner.LabelRunnerUID] != "" && existingPod.Labels[runner.LabelRunnerUID] != string(epRunner.UID) {
-			return ctrl.Result{}, fmt.Errorf("remote runner pod %s exists with different runner UID", epRunner.Spec.RunnerName)
-		}
+	if podRes != nil {
+		return *podRes, nil
 	}
 
 	epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseStarting
@@ -306,6 +284,117 @@ func (r *EphemeralRunnerReconciler) reconcileProvisioning(ctx context.Context, e
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
+func (r *EphemeralRunnerReconciler) ensureJitSecret(
+	ctx context.Context,
+	remoteClient client.Client,
+	epRunner, origRunner *ghav1alpha1.EphemeralRunner,
+	scaleSet *ghav1alpha1.RunnerScaleSet,
+	runnerNs string,
+) (*ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	secretName := runner.JitSecretName(epRunner.Spec.RunnerName)
+	var existingSecret corev1.Secret
+	err := remoteClient.Get(ctx, client.ObjectKey{Namespace: runnerNs, Name: secretName}, &existingSecret)
+	if err != nil && !apierrors.IsNotFound(err) {
+		log.Error(err, "failed to check existing remote JIT secret")
+		res := ctrl.Result{RequeueAfter: 5 * time.Second}
+		return &res, nil
+	}
+
+	if apierrors.IsNotFound(err) {
+		ghaClient, clientErr := r.getGitHubClient(ctx, scaleSet)
+		if clientErr != nil {
+			log.Error(clientErr, "failed to get github client for JIT config generation")
+			conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonFailed, clientErr.Error())
+			if updateErr := r.updateStatus(ctx, epRunner, origRunner); updateErr != nil {
+				log.Error(updateErr, "failed to update status")
+			}
+			res := ctrl.Result{RequeueAfter: 10 * time.Second}
+			return &res, nil
+		}
+
+		existingRunner, getErr := ghaClient.GetRunnerByName(ctx, epRunner.Status.Provisioning.RunnerName)
+		if getErr == nil && existingRunner != nil {
+			log.Info("found existing orphaned runner on GitHub from previous failed attempt, cleaning up", "runnerName", epRunner.Status.Provisioning.RunnerName, "runnerID", existingRunner.ID)
+			if removeErr := ghaClient.RemoveRunner(ctx, int64(existingRunner.ID)); removeErr != nil {
+				log.Error(removeErr, "failed to remove existing orphaned runner")
+			}
+		}
+
+		jitResp, genErr := ghaClient.GenerateJITConfig(ctx, scaleSet.Status.ScaleSetID, epRunner.Status.Provisioning.RunnerName, scaleSet.Spec.Runner.WorkDir)
+		if genErr != nil {
+			log.Error(genErr, "failed to generate JIT runner config")
+			if r.Recorder != nil {
+				r.Recorder.Eventf(epRunner, nil, corev1.EventTypeWarning, "JITConfigFailed", "Reconcile", "Failed to generate JIT runner config: %v", genErr)
+			}
+			epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseFailed
+			conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonFailed, genErr.Error())
+			if updateErr := r.updateStatus(ctx, epRunner, origRunner); updateErr != nil {
+				log.Error(updateErr, "failed to update status")
+			}
+			res := ctrl.Result{RequeueAfter: 10 * time.Second}
+			return &res, nil
+		}
+
+		now := metav1.Now()
+		epRunner.Status.Provisioning.RunnerID = jitResp.RunnerID
+		epRunner.Status.Provisioning.JITGeneratedAt = &now
+
+		jitSecret := runner.BuildJitSecret(runnerNs, epRunner, jitResp.EncodedJITConfig)
+		if createErr := remoteClient.Create(ctx, jitSecret); createErr != nil && !apierrors.IsAlreadyExists(createErr) {
+			log.Error(createErr, "failed to create JIT secret on remote cluster; removing runner from GitHub as compensation")
+			if jitResp.RunnerID != 0 {
+				if removeErr := ghaClient.RemoveRunner(context.WithoutCancel(ctx), jitResp.RunnerID); removeErr != nil {
+					log.Error(removeErr, "failed to remove runner compensation")
+				}
+			}
+			res := ctrl.Result{RequeueAfter: 5 * time.Second}
+			return &res, nil
+		}
+	} else {
+		if existingSecret.Labels[runner.LabelRunnerUID] != "" && existingSecret.Labels[runner.LabelRunnerUID] != string(epRunner.UID) {
+			return nil, fmt.Errorf("remote JIT secret %s exists with different runner UID", secretName)
+		}
+	}
+
+	return nil, nil
+}
+
+func (r *EphemeralRunnerReconciler) ensureRunnerPod(
+	ctx context.Context,
+	remoteClient client.Client,
+	epRunner *ghav1alpha1.EphemeralRunner,
+	scaleSet *ghav1alpha1.RunnerScaleSet,
+	runnerNs string,
+) (*ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	var existingPod corev1.Pod
+	err := remoteClient.Get(ctx, client.ObjectKey{Namespace: runnerNs, Name: epRunner.Spec.RunnerName}, &existingPod)
+	if err != nil && !apierrors.IsNotFound(err) {
+		log.Error(err, "failed to check existing remote runner pod")
+		res := ctrl.Result{RequeueAfter: 5 * time.Second}
+		return &res, nil
+	}
+
+	if apierrors.IsNotFound(err) {
+		pod := runner.BuildRunnerPod(runnerNs, scaleSet, epRunner)
+		if createErr := remoteClient.Create(ctx, pod); createErr != nil && !apierrors.IsAlreadyExists(createErr) {
+			log.Error(createErr, "failed to create runner pod on remote cluster")
+			res := ctrl.Result{RequeueAfter: 5 * time.Second}
+			return &res, nil
+		}
+		if r.Recorder != nil {
+			r.Recorder.Eventf(epRunner, nil, corev1.EventTypeNormal, "Provisioned", "Reconcile", "Created remote runner Pod %s and JIT Secret in namespace %s", pod.Name, runnerNs)
+		}
+	} else {
+		if existingPod.Labels[runner.LabelRunnerUID] != "" && existingPod.Labels[runner.LabelRunnerUID] != string(epRunner.UID) {
+			return nil, fmt.Errorf("remote runner pod %s exists with different runner UID", epRunner.Spec.RunnerName)
+		}
+	}
+
+	return nil, nil
+}
+
 func (r *EphemeralRunnerReconciler) reconcileRunning(ctx context.Context, epRunner, origRunner *ghav1alpha1.EphemeralRunner, scaleSet *ghav1alpha1.RunnerScaleSet, cluster *ghav1alpha1.RunnerCluster, runnerNs string) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -319,36 +408,7 @@ func (r *EphemeralRunnerReconciler) reconcileRunning(ctx context.Context, epRunn
 	err = remoteClient.Get(ctx, client.ObjectKey{Namespace: runnerNs, Name: epRunner.Spec.RunnerName}, &pod)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			now := metav1.Now()
-			epRunner.Status.FinishedAt = &now
-			if epRunner.Status.GitHub.CompletedObserved {
-				log.Info("remote runner pod already deleted after job completion", "runner", epRunner.Name)
-				epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseCompleted
-				r.updateStatus(ctx, epRunner, origRunner)
-				r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner)
-				return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
-			}
-
-			log.Info("remote runner pod not found, marking as failed", "runner", epRunner.Name)
-			if r.Recorder != nil {
-				r.Recorder.Eventf(epRunner, corev1.EventTypeWarning, "PodNotFound", "Remote runner Pod was not found")
-			}
-			epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseFailed
-			epRunner.Status.Failure = &ghav1alpha1.RunnerFailureStatus{
-				Reason:  "PodNotFound",
-				Message: "Remote runner Pod was unexpectedly not found",
-			}
-
-			// Job完了前にPodが消滅した場合、GitHub側RunnerをBest-effortでRemove
-			if !epRunner.Status.GitHub.CompletedObserved && epRunner.Status.Provisioning != nil && epRunner.Status.Provisioning.RunnerID != 0 {
-				if ghaClient, clientErr := r.getGitHubClient(ctx, scaleSet); clientErr == nil {
-					ghaClient.RemoveRunner(context.WithoutCancel(ctx), epRunner.Status.Provisioning.RunnerID)
-				}
-			}
-
-			r.updateStatus(ctx, epRunner, origRunner)
-			r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner)
-			return ctrl.Result{RequeueAfter: 1 * time.Hour}, nil
+			return r.handlePodNotFound(ctx, epRunner, origRunner, scaleSet, cluster, runnerNs)
 		}
 		// 一時的な通信エラーの場合はFailedに倒さずRequeue
 		log.Error(err, "transient error reading remote pod, requeueing", "runner", epRunner.Name)
@@ -358,6 +418,88 @@ func (r *EphemeralRunnerReconciler) reconcileRunning(ctx context.Context, epRunn
 	epRunner.Status.RemotePod.UID = string(pod.UID)
 	epRunner.Status.RemotePod.NodeName = pod.Spec.NodeName
 
+	r.applyPodStatus(epRunner, &pod)
+
+	if err := r.updateStatus(ctx, epRunner, origRunner); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Completedの場合はリモートリソースを即時削除してCRは10分間TTL保持、Failedの場合は1時間TTL保持
+	switch epRunner.Status.Phase {
+	case ghav1alpha1.EphemeralRunnerPhaseCompleted:
+		if cleanupErr := r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner); cleanupErr != nil {
+			log.Error(cleanupErr, "failed to cleanup remote resources")
+		}
+		return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
+	case ghav1alpha1.EphemeralRunnerPhaseFailed:
+		if cleanupErr := r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner); cleanupErr != nil {
+			log.Error(cleanupErr, "failed to cleanup remote resources")
+		}
+		return ctrl.Result{RequeueAfter: 1 * time.Hour}, nil
+	case ghav1alpha1.EphemeralRunnerPhasePending,
+		ghav1alpha1.EphemeralRunnerPhaseWaitingForCluster,
+		ghav1alpha1.EphemeralRunnerPhaseProvisioning,
+		ghav1alpha1.EphemeralRunnerPhaseStarting,
+		ghav1alpha1.EphemeralRunnerPhaseIdle,
+		ghav1alpha1.EphemeralRunnerPhaseBusy,
+		ghav1alpha1.EphemeralRunnerPhaseDeleting:
+	}
+
+	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+}
+
+func (r *EphemeralRunnerReconciler) handlePodNotFound(
+	ctx context.Context,
+	epRunner, origRunner *ghav1alpha1.EphemeralRunner,
+	scaleSet *ghav1alpha1.RunnerScaleSet,
+	cluster *ghav1alpha1.RunnerCluster,
+	runnerNs string,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	now := metav1.Now()
+	epRunner.Status.FinishedAt = &now
+	if epRunner.Status.GitHub.CompletedObserved {
+		log.Info("remote runner pod already deleted after job completion", "runner", epRunner.Name)
+		epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseCompleted
+		if updateErr := r.updateStatus(ctx, epRunner, origRunner); updateErr != nil {
+			log.Error(updateErr, "failed to update status")
+		}
+		if cleanupErr := r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner); cleanupErr != nil {
+			log.Error(cleanupErr, "failed to cleanup remote resources")
+		}
+		return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
+	}
+
+	log.Info("remote runner pod not found, marking as failed", "runner", epRunner.Name)
+	if r.Recorder != nil {
+		r.Recorder.Eventf(epRunner, nil, corev1.EventTypeWarning, "PodNotFound", "Reconcile", "Remote runner Pod was not found")
+	}
+	epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseFailed
+	epRunner.Status.Failure = &ghav1alpha1.RunnerFailureStatus{
+		Reason:  "PodNotFound",
+		Message: "Remote runner Pod was unexpectedly not found",
+	}
+
+	// Job完了前にPodが消滅した場合、GitHub側RunnerをBest-effortでRemove
+	if !epRunner.Status.GitHub.CompletedObserved && epRunner.Status.Provisioning != nil && epRunner.Status.Provisioning.RunnerID != 0 {
+		if ghaClient, clientErr := r.getGitHubClient(ctx, scaleSet); clientErr == nil {
+			if removeErr := ghaClient.RemoveRunner(context.WithoutCancel(ctx), epRunner.Status.Provisioning.RunnerID); removeErr != nil {
+				log.Error(removeErr, "failed to remove runner from GitHub")
+			}
+		}
+	}
+
+	if updateErr := r.updateStatus(ctx, epRunner, origRunner); updateErr != nil {
+		log.Error(updateErr, "failed to update status")
+	}
+	if cleanupErr := r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner); cleanupErr != nil {
+		log.Error(cleanupErr, "failed to cleanup remote resources")
+	}
+	return ctrl.Result{RequeueAfter: 1 * time.Hour}, nil
+}
+
+func (r *EphemeralRunnerReconciler) applyPodStatus(epRunner *ghav1alpha1.EphemeralRunner, pod *corev1.Pod) {
+	log := logf.Log.WithName("ephemeralrunner-controller")
 	switch pod.Status.Phase {
 	case corev1.PodPending:
 		conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypePodReady, metav1.ConditionFalse, conditions.ReasonPodPending, "Pod is pending")
@@ -365,14 +507,14 @@ func (r *EphemeralRunnerReconciler) reconcileRunning(ctx context.Context, epRunn
 		conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypePodReady, metav1.ConditionTrue, conditions.ReasonPodRunning, "Pod is running")
 		if epRunner.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseStarting {
 			if r.Recorder != nil {
-				r.Recorder.Eventf(epRunner, corev1.EventTypeNormal, "PodRunning", "Remote runner Pod is running on node %s", pod.Spec.NodeName)
+				r.Recorder.Eventf(epRunner, nil, corev1.EventTypeNormal, "PodRunning", "Reconcile", "Remote runner Pod is running on node %s", pod.Spec.NodeName)
 			}
 			epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseIdle
 		}
 	case corev1.PodSucceeded:
 		log.Info("remote runner pod succeeded (job completed)", "runner", epRunner.Name)
 		if r.Recorder != nil {
-			r.Recorder.Eventf(epRunner, corev1.EventTypeNormal, "JobCompleted", "Remote runner Pod completed successfully")
+			r.Recorder.Eventf(epRunner, nil, corev1.EventTypeNormal, "JobCompleted", "Reconcile", "Remote runner Pod completed successfully")
 		}
 		now := metav1.Now()
 		epRunner.Status.FinishedAt = &now
@@ -381,7 +523,7 @@ func (r *EphemeralRunnerReconciler) reconcileRunning(ctx context.Context, epRunn
 	case corev1.PodFailed:
 		log.Info("remote runner pod failed", "runner", epRunner.Name)
 		if r.Recorder != nil {
-			r.Recorder.Eventf(epRunner, corev1.EventTypeWarning, "JobFailed", "Remote runner Pod failed")
+			r.Recorder.Eventf(epRunner, nil, corev1.EventTypeWarning, "JobFailed", "Reconcile", "Remote runner Pod failed")
 		}
 		now := metav1.Now()
 		epRunner.Status.FinishedAt = &now
@@ -401,23 +543,9 @@ func (r *EphemeralRunnerReconciler) reconcileRunning(ctx context.Context, epRunn
 			}
 		}
 		epRunner.Status.Failure = failureStatus
+	case corev1.PodUnknown:
+		conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypePodReady, metav1.ConditionFalse, conditions.ReasonNotReady, "Pod phase is unknown")
 	}
-
-	if err := r.updateStatus(ctx, epRunner, origRunner); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	// Completedの場合はリモートリソースを即時削除してCRは10分間TTL保持、Failedの場合は1時間TTL保持
-	switch epRunner.Status.Phase {
-	case ghav1alpha1.EphemeralRunnerPhaseCompleted:
-		r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner)
-		return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
-	case ghav1alpha1.EphemeralRunnerPhaseFailed:
-		r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner)
-		return ctrl.Result{RequeueAfter: 1 * time.Hour}, nil
-	}
-
-	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
 func (r *EphemeralRunnerReconciler) getGitHubClient(ctx context.Context, ss *ghav1alpha1.RunnerScaleSet) (githubscaleset.ScaleSetClient, error) {
@@ -434,47 +562,41 @@ func (r *EphemeralRunnerReconciler) getGitHubClient(ctx context.Context, ss *gha
 	return r.ScaleSetFactory.NewClient(ss.Spec.GitHub.ConfigURL, auth)
 }
 
-func (r *EphemeralRunnerReconciler) cleanupRemoteResources(ctx context.Context, cluster *ghav1alpha1.RunnerCluster, namespace string, epRunner *ghav1alpha1.EphemeralRunner) (bool, error) {
+func (r *EphemeralRunnerReconciler) cleanupRemoteResources(ctx context.Context, cluster *ghav1alpha1.RunnerCluster, namespace string, epRunner *ghav1alpha1.EphemeralRunner) error {
 	log := logf.FromContext(ctx)
 	remoteClient, err := r.RemoteProvider.GetClient(ctx, cluster)
 	if err != nil {
 		log.Error(err, "failed to get client for remote cluster cleanup")
-		return false, err
+		return err
 	}
 
-	podGone := false
 	var pod corev1.Pod
 	if err := remoteClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: epRunner.Spec.RunnerName}, &pod); err != nil {
-		if apierrors.IsNotFound(err) {
-			podGone = true
-		} else {
-			return false, err
+		if !apierrors.IsNotFound(err) {
+			return err
 		}
 	} else {
 		if pod.DeletionTimestamp.IsZero() {
 			if delErr := remoteClient.Delete(ctx, &pod); delErr != nil && !apierrors.IsNotFound(delErr) {
-				return false, delErr
+				return delErr
 			}
 		}
 	}
 
-	secretGone := false
 	var sec corev1.Secret
 	if err := remoteClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: runner.JitSecretName(epRunner.Spec.RunnerName)}, &sec); err != nil {
-		if apierrors.IsNotFound(err) {
-			secretGone = true
-		} else {
-			return false, err
+		if !apierrors.IsNotFound(err) {
+			return err
 		}
 	} else {
 		if sec.DeletionTimestamp.IsZero() {
 			if delErr := remoteClient.Delete(ctx, &sec); delErr != nil && !apierrors.IsNotFound(delErr) {
-				return false, delErr
+				return delErr
 			}
 		}
 	}
 
-	return podGone && secretGone, nil
+	return nil
 }
 
 func (r *EphemeralRunnerReconciler) findRunnersForCluster(ctx context.Context, obj client.Object) []ctrl.Request {

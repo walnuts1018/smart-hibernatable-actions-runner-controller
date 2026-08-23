@@ -9,7 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -27,7 +27,7 @@ import (
 type RunnerNodePoolReconciler struct {
 	client.Client
 	Scheme          *runtime.Scheme
-	Recorder        record.EventRecorder
+	Recorder        events.EventRecorder
 	RemoteProvider  remotecluster.Provider
 	Planner         capacity.Planner
 	EnableMultiNode bool
@@ -58,7 +58,9 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err := r.Get(ctx, client.ObjectKey{Namespace: nodePool.Namespace, Name: nodePool.Spec.ClusterRef.Name}, &cluster); err != nil {
 		log.Error(err, "failed to get cluster for nodepool", "cluster", nodePool.Spec.ClusterRef.Name)
 		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, fmt.Sprintf("Cluster %s not found: %v", nodePool.Spec.ClusterRef.Name, err))
-		r.updateStatus(ctx, &nodePool, origNodePool)
+		if updateErr := r.updateStatus(ctx, &nodePool, origNodePool); updateErr != nil {
+			log.Error(updateErr, "failed to update status")
+		}
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
@@ -66,14 +68,18 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	selector, err := metav1.LabelSelectorAsSelector(&nodePool.Spec.MachineSelector)
 	if err != nil {
 		log.Error(err, "invalid machine selector")
-		r.updateStatus(ctx, &nodePool, origNodePool)
+		if updateErr := r.updateStatus(ctx, &nodePool, origNodePool); updateErr != nil {
+			log.Error(updateErr, "failed to update status")
+		}
 		return ctrl.Result{}, err
 	}
 
 	var machineList ghav1alpha1.RunnerMachineList
 	if err := r.List(ctx, &machineList, client.InNamespace(nodePool.Namespace), client.MatchingLabelsSelector{Selector: selector}); err != nil {
 		log.Error(err, "failed to list runner machines for nodepool")
-		r.updateStatus(ctx, &nodePool, origNodePool)
+		if updateErr := r.updateStatus(ctx, &nodePool, origNodePool); updateErr != nil {
+			log.Error(updateErr, "failed to update status")
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -81,7 +87,9 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	_, totalRequiredCapacity, err := r.aggregateDemand(ctx, &nodePool)
 	if err != nil {
 		log.Error(err, "failed to aggregate demand for nodepool")
-		r.updateStatus(ctx, &nodePool, origNodePool)
+		if updateErr := r.updateStatus(ctx, &nodePool, origNodePool); updateErr != nil {
+			log.Error(updateErr, "failed to update status")
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -98,20 +106,24 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	plan := r.Planner.Plan(machineCapacities, int(totalRequiredCapacity))
 	if plan.MultiNodeViolated {
 		if r.Recorder != nil {
-			r.Recorder.Eventf(&nodePool, corev1.EventTypeWarning, "MultiNodeUnsupported", "MultiNode capacity planning is not supported in v1")
+			r.Recorder.Eventf(&nodePool, nil, corev1.EventTypeWarning, "MultiNodeUnsupported", "Reconcile", "MultiNode capacity planning is not supported in v1")
 		}
 		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonMultiNodeUnsupported, "MultiNode is unsupported in v1")
-		r.updateStatus(ctx, &nodePool, origNodePool)
+		if updateErr := r.updateStatus(ctx, &nodePool, origNodePool); updateErr != nil {
+			log.Error(updateErr, "failed to update status")
+		}
 		return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
 	}
 
 	if plan.BootstrapUnavailable {
 		if r.Recorder != nil {
-			r.Recorder.Eventf(&nodePool, corev1.EventTypeWarning, "BootstrapUnavailable", "Required bootstrap machine is quarantined or under maintenance")
+			r.Recorder.Eventf(&nodePool, nil, corev1.EventTypeWarning, "BootstrapUnavailable", "Reconcile", "Required bootstrap machine is quarantined or under maintenance")
 		}
 		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonBootstrapUnavailable, "Required bootstrap machine is quarantined or under maintenance")
 		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeCapacityReady, metav1.ConditionFalse, conditions.ReasonBootstrapUnavailable, "Cluster prerequisite unavailable")
-		r.updateStatus(ctx, &nodePool, origNodePool)
+		if updateErr := r.updateStatus(ctx, &nodePool, origNodePool); updateErr != nil {
+			log.Error(updateErr, "failed to update status")
+		}
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
@@ -213,11 +225,11 @@ func (r *RunnerNodePoolReconciler) aggregateDemand(ctx context.Context, nodePool
 }
 
 func (r *RunnerNodePoolReconciler) collectMachineCapacities(machines []ghav1alpha1.RunnerMachine) ([]capacity.MachineCapacity, int32, int32, int32) {
+	machineCapacities := make([]capacity.MachineCapacity, 0, len(machines))
 	var (
-		machineCapacities []capacity.MachineCapacity
-		poweredOnCount    int32
-		readyNodesCount   int32
-		readyCapacity     int32
+		poweredOnCount  int32
+		readyNodesCount int32
+		readyCapacity   int32
 	)
 
 	for i := range machines {
@@ -265,9 +277,10 @@ func (r *RunnerNodePoolReconciler) updateDesiredMachinesPlan(
 		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeIdle, metav1.ConditionFalse, conditions.ReasonActive, "Runner demand is active")
 	} else {
 		if nodePool.Status.IdleSince == nil {
-			nodePool.Status.IdleSince = &now
+			nowTime := metav1.Now()
+			nodePool.Status.IdleSince = &nowTime
 			if r.Recorder != nil {
-				r.Recorder.Eventf(nodePool, corev1.EventTypeNormal, "IdleTimerStarted", "Runner demand dropped to zero, idle timer started")
+				r.Recorder.Eventf(nodePool, nil, corev1.EventTypeNormal, "IdleTimerStarted", "Reconcile", "Runner demand dropped to zero, idle timer started")
 			}
 			conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeIdle, metav1.ConditionTrue, conditions.ReasonIdle, "No runner demand, idle timer started")
 		}
@@ -320,9 +333,12 @@ func isRunnerNonTerminal(phase ghav1alpha1.EphemeralRunnerPhase) bool {
 	switch phase {
 	case ghav1alpha1.EphemeralRunnerPhaseCompleted, ghav1alpha1.EphemeralRunnerPhaseFailed, ghav1alpha1.EphemeralRunnerPhaseDeleting:
 		return false
-	default:
+	case ghav1alpha1.EphemeralRunnerPhasePending, ghav1alpha1.EphemeralRunnerPhaseWaitingForCluster,
+		ghav1alpha1.EphemeralRunnerPhaseProvisioning, ghav1alpha1.EphemeralRunnerPhaseStarting,
+		ghav1alpha1.EphemeralRunnerPhaseIdle, ghav1alpha1.EphemeralRunnerPhaseBusy:
 		return true
 	}
+	return true
 }
 
 func (r *RunnerNodePoolReconciler) findNodePoolsForMachine(ctx context.Context, obj client.Object) []ctrl.Request {
