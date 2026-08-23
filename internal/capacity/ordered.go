@@ -1,4 +1,3 @@
-// Package capacity provides capacity planning algorithms for runner nodes.
 package capacity
 
 import (

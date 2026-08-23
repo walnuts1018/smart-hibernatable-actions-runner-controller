@@ -1,4 +1,3 @@
-// Package remotecluster provides client caching and connectivity operations for remote Kubernetes clusters.
 package remotecluster
 
 import (

@@ -1,4 +1,3 @@
-// Package conditions defines standard status condition types and reasons.
 package conditions
 
 import (
