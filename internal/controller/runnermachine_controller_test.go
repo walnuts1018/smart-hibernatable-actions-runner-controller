@@ -23,14 +23,14 @@ func TestRunnerMachineReconciler_ScaleFromZero_PowerOnAndUncordon(t *testing.T) 
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Name: "c1", Namespace: "default",
 		Status: ghav1alpha1.RunnerClusterStatus{
 			APIReachable: true,
 		},
 	}
 
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "redfish-secret", Namespace: "default"},
+		Name: "redfish-secret", Namespace: "default",
 		Data: map[string][]byte{
 			"username": []byte("admin"),
 			"password": []byte("password"),
@@ -38,12 +38,10 @@ func TestRunnerMachineReconciler_ScaleFromZero_PowerOnAndUncordon(t *testing.T) 
 	}
 
 	machine := &ghav1alpha1.RunnerMachine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "m1",
-			Namespace: "default",
-			UID:       "machine-uid-1",
-			Labels:    map[string]string{"pool": "p1"},
-		},
+		Name:      "m1",
+		Namespace: "default",
+		UID:       "machine-uid-1",
+		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
 			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
 			KubernetesNodeName: "node1",
@@ -59,7 +57,7 @@ func TestRunnerMachineReconciler_ScaleFromZero_PowerOnAndUncordon(t *testing.T) 
 	}
 
 	nodePool := &ghav1alpha1.RunnerNodePool{
-		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
 			MachineSelector: metav1.LabelSelector{
@@ -78,11 +76,9 @@ func TestRunnerMachineReconciler_ScaleFromZero_PowerOnAndUncordon(t *testing.T) 
 	}
 
 	remoteNode := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "node1",
-			Annotations: map[string]string{
-				runner.AnnotationCordonedBy: "machine-uid-1",
-			},
+		Name: "node1",
+		Annotations: map[string]string{
+			runner.AnnotationCordonedBy: "machine-uid-1",
 		},
 		Spec: corev1.NodeSpec{
 			Unschedulable: true,
@@ -115,7 +111,7 @@ func TestRunnerMachineReconciler_ScaleFromZero_PowerOnAndUncordon(t *testing.T) 
 
 	// 1. First reconcile: 電源OFF状態からPowerOnが呼ばれる
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "m1"},
+		Namespace: "default", Name: "m1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -128,7 +124,7 @@ func TestRunnerMachineReconciler_ScaleFromZero_PowerOnAndUncordon(t *testing.T) 
 	// 2. Second reconcile: 電源ONになりNodeがReadyになったらUncordonされる
 	pwrCtrl.powerState = ghav1alpha1.PowerStateOn
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "m1"},
+		Namespace: "default", Name: "m1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -153,7 +149,7 @@ func TestRunnerMachineReconciler_ScaleDown_DrainingAndShutdown(t *testing.T) {
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Name: "c1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerClusterSpec{
 			RunnerNamespace: "gha-runners",
 		},
@@ -163,7 +159,7 @@ func TestRunnerMachineReconciler_ScaleDown_DrainingAndShutdown(t *testing.T) {
 	}
 
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "redfish-secret", Namespace: "default"},
+		Name: "redfish-secret", Namespace: "default",
 		Data: map[string][]byte{
 			"username": []byte("admin"),
 			"password": []byte("password"),
@@ -171,12 +167,10 @@ func TestRunnerMachineReconciler_ScaleDown_DrainingAndShutdown(t *testing.T) {
 	}
 
 	machine := &ghav1alpha1.RunnerMachine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "m1",
-			Namespace: "default",
-			UID:       "machine-uid-1",
-			Labels:    map[string]string{"pool": "p1"},
-		},
+		Name:      "m1",
+		Namespace: "default",
+		UID:       "machine-uid-1",
+		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
 			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
 			KubernetesNodeName: "node1",
@@ -193,7 +187,7 @@ func TestRunnerMachineReconciler_ScaleDown_DrainingAndShutdown(t *testing.T) {
 
 	drainPast := metav1.NewTime(time.Now().Add(-15 * time.Minute))
 	nodePool := &ghav1alpha1.RunnerNodePool{
-		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
 			MachineSelector: metav1.LabelSelector{
@@ -216,9 +210,7 @@ func TestRunnerMachineReconciler_ScaleDown_DrainingAndShutdown(t *testing.T) {
 	}
 
 	remoteNode := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "node1",
-		},
+		Name: "node1",
 		Spec: corev1.NodeSpec{
 			Unschedulable: false,
 		},
@@ -231,12 +223,10 @@ func TestRunnerMachineReconciler_ScaleDown_DrainingAndShutdown(t *testing.T) {
 
 	// 実行中のRunner Podが存在する状態
 	runnerPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "runner-1",
-			Namespace: "gha-runners",
-			Labels: map[string]string{
-				runner.LabelManagedBy: runner.LabelManagedByValue,
-			},
+		Name:      "runner-1",
+		Namespace: "gha-runners",
+		Labels: map[string]string{
+			runner.LabelManagedBy: runner.LabelManagedByValue,
 		},
 		Spec: corev1.PodSpec{
 			NodeName: "node1",
@@ -267,7 +257,7 @@ func TestRunnerMachineReconciler_ScaleDown_DrainingAndShutdown(t *testing.T) {
 
 	// 1. Pod実行中の場合: NodeがCordonされるが、GracefulShutdownは呼ばれない（Drain待ち）
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "m1"},
+		Namespace: "default", Name: "m1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -289,7 +279,7 @@ func TestRunnerMachineReconciler_ScaleDown_DrainingAndShutdown(t *testing.T) {
 	_ = remoteClient.Delete(context.Background(), runnerPod)
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "m1"},
+		Namespace: "default", Name: "m1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -306,14 +296,14 @@ func TestRunnerMachineReconciler_ExternalCordonProtection(t *testing.T) {
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Name: "c1", Namespace: "default",
 		Status: ghav1alpha1.RunnerClusterStatus{
 			APIReachable: true,
 		},
 	}
 
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "redfish-secret", Namespace: "default"},
+		Name: "redfish-secret", Namespace: "default",
 		Data: map[string][]byte{
 			"username": []byte("admin"),
 			"password": []byte("password"),
@@ -321,12 +311,10 @@ func TestRunnerMachineReconciler_ExternalCordonProtection(t *testing.T) {
 	}
 
 	machine := &ghav1alpha1.RunnerMachine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "m1",
-			Namespace: "default",
-			UID:       "machine-uid-1",
-			Labels:    map[string]string{"pool": "p1"},
-		},
+		Name:      "m1",
+		Namespace: "default",
+		UID:       "machine-uid-1",
+		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
 			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
 			KubernetesNodeName: "node1",
@@ -342,7 +330,7 @@ func TestRunnerMachineReconciler_ExternalCordonProtection(t *testing.T) {
 	}
 
 	nodePool := &ghav1alpha1.RunnerNodePool{
-		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
 			MachineSelector: metav1.LabelSelector{
@@ -362,9 +350,7 @@ func TestRunnerMachineReconciler_ExternalCordonProtection(t *testing.T) {
 
 	// 管理者が手動でkubectl cordonしたノード (Unschedulable=true, cordoned-by annotationなし)
 	externalCordonedNode := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "node1",
-		},
+		Name: "node1",
 		Spec: corev1.NodeSpec{
 			Unschedulable: true,
 		},
@@ -396,7 +382,7 @@ func TestRunnerMachineReconciler_ExternalCordonProtection(t *testing.T) {
 
 	// 1. スケールダウンReconcile: 外部Cordonノードに対してSHARCが所有権を奪わず、電源OFFもブロックされること
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "m1"},
+		Namespace: "default", Name: "m1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -429,7 +415,7 @@ func TestRunnerMachineReconciler_ExternalCordonProtection(t *testing.T) {
 	_ = fakeClient.Status().Update(context.Background(), nodePool)
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "m1"},
+		Namespace: "default", Name: "m1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -449,14 +435,14 @@ func TestRunnerMachineReconciler_MachineIDMismatchAndExplicitAdoption(t *testing
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Name: "c1", Namespace: "default",
 		Status: ghav1alpha1.RunnerClusterStatus{
 			APIReachable: true,
 		},
 	}
 
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "redfish-secret", Namespace: "default"},
+		Name: "redfish-secret", Namespace: "default",
 		Data: map[string][]byte{
 			"username": []byte("admin"),
 			"password": []byte("password"),
@@ -464,12 +450,10 @@ func TestRunnerMachineReconciler_MachineIDMismatchAndExplicitAdoption(t *testing
 	}
 
 	machine := &ghav1alpha1.RunnerMachine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "m1",
-			Namespace: "default",
-			UID:       "machine-uid-1",
-			Labels:    map[string]string{"pool": "p1"},
-		},
+		Name:      "m1",
+		Namespace: "default",
+		UID:       "machine-uid-1",
+		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
 			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
 			KubernetesNodeName: "node1",
@@ -489,7 +473,7 @@ func TestRunnerMachineReconciler_MachineIDMismatchAndExplicitAdoption(t *testing
 	}
 
 	nodePool := &ghav1alpha1.RunnerNodePool{
-		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
 		},
@@ -502,10 +486,8 @@ func TestRunnerMachineReconciler_MachineIDMismatchAndExplicitAdoption(t *testing
 
 	// 別のMachineIDを持つNode（OS再インストールやホスト衝突の再現）
 	collisionNode := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "node1",
-			UID:  "node-uid-2",
-		},
+		Name: "node1",
+		UID:  "node-uid-2",
 		Status: corev1.NodeStatus{
 			NodeInfo: corev1.NodeSystemInfo{
 				MachineID: "different-machine-id-456",
@@ -536,7 +518,7 @@ func TestRunnerMachineReconciler_MachineIDMismatchAndExplicitAdoption(t *testing
 
 	// 1. Reconcile実行: MachineID Mismatch が検知され、BoundMachineID は上書きされずに保持されること
 	res, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "m1"},
+		Namespace: "default", Name: "m1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -567,7 +549,7 @@ func TestRunnerMachineReconciler_MachineIDMismatchAndExplicitAdoption(t *testing
 	_ = fakeClient.Update(context.Background(), &checkMachine)
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "m1"},
+		Namespace: "default", Name: "m1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -591,14 +573,14 @@ func TestRunnerMachineReconciler_RedfishCircuitBreaker(t *testing.T) {
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Name: "c1", Namespace: "default",
 		Status: ghav1alpha1.RunnerClusterStatus{
 			APIReachable: true,
 		},
 	}
 
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "redfish-secret", Namespace: "default"},
+		Name: "redfish-secret", Namespace: "default",
 		Data: map[string][]byte{
 			"username": []byte("admin"),
 			"password": []byte("password"),
@@ -607,12 +589,10 @@ func TestRunnerMachineReconciler_RedfishCircuitBreaker(t *testing.T) {
 
 	futureProbe := metav1.NewTime(time.Now().Add(5 * time.Minute))
 	machine := &ghav1alpha1.RunnerMachine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "m1",
-			Namespace: "default",
-			UID:       "machine-uid-1",
-			Labels:    map[string]string{"pool": "p1"},
-		},
+		Name:      "m1",
+		Namespace: "default",
+		UID:       "machine-uid-1",
+		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
 			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
 			KubernetesNodeName: "node1",
@@ -633,7 +613,7 @@ func TestRunnerMachineReconciler_RedfishCircuitBreaker(t *testing.T) {
 	}
 
 	nodePool := &ghav1alpha1.RunnerNodePool{
-		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
 		},
@@ -645,7 +625,7 @@ func TestRunnerMachineReconciler_RedfishCircuitBreaker(t *testing.T) {
 	}
 
 	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+		Name: "node1",
 		Status: corev1.NodeStatus{
 			NodeInfo: corev1.NodeSystemInfo{MachineID: "mid-1"},
 			Conditions: []corev1.NodeCondition{
@@ -674,7 +654,7 @@ func TestRunnerMachineReconciler_RedfishCircuitBreaker(t *testing.T) {
 
 	// CircuitOpen かつ NextProbeTime 未到達の場合: Redfish 呼び出しはスキップされ、電力状態は維持される
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "m1"},
+		Namespace: "default", Name: "m1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

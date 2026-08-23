@@ -341,10 +341,8 @@ func (r *RunnerNodePoolReconciler) findNodePoolsForMachine(ctx context.Context, 
 		selector, err := metav1.LabelSelectorAsSelector(&p.Spec.MachineSelector)
 		if err == nil && selector.Matches(labels.Set(m.Labels)) {
 			requests = append(requests, ctrl.Request{
-				NamespacedName: client.ObjectKey{
-					Namespace: p.Namespace,
-					Name:      p.Name,
-				},
+				Namespace: p.Namespace,
+				Name:      p.Name,
 			})
 		}
 	}
@@ -359,10 +357,8 @@ func (r *RunnerNodePoolReconciler) findNodePoolsForScaleSet(ctx context.Context,
 
 	return []ctrl.Request{
 		{
-			NamespacedName: client.ObjectKey{
-				Namespace: ss.Namespace,
-				Name:      ss.Spec.NodePoolRef.Name,
-			},
+			Namespace: ss.Namespace,
+			Name:      ss.Spec.NodePoolRef.Name,
 		},
 	}
 }
@@ -380,10 +376,8 @@ func (r *RunnerNodePoolReconciler) findNodePoolsForRunner(ctx context.Context, o
 
 	return []ctrl.Request{
 		{
-			NamespacedName: client.ObjectKey{
-				Namespace: ss.Namespace,
-				Name:      ss.Spec.NodePoolRef.Name,
-			},
+			Namespace: ss.Namespace,
+			Name:      ss.Spec.NodePoolRef.Name,
 		},
 	}
 }
@@ -403,10 +397,8 @@ func (r *RunnerNodePoolReconciler) findNodePoolsForCluster(ctx context.Context, 
 	for _, p := range pools.Items {
 		if p.Spec.ClusterRef.Name == cluster.Name {
 			requests = append(requests, ctrl.Request{
-				NamespacedName: client.ObjectKey{
-					Namespace: p.Namespace,
-					Name:      p.Name,
-				},
+				Namespace: p.Namespace,
+				Name:      p.Name,
 			})
 		}
 	}

@@ -4,7 +4,6 @@ import (
 	"maps"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 )
@@ -26,10 +25,8 @@ func BuildRunnerPod(namespace string, scaleSet *ghav1alpha1.RunnerScaleSet, runn
 		Name: EnvJitConfig,
 		ValueFrom: &corev1.EnvVarSource{
 			SecretKeyRef: &corev1.SecretKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{
-					Name: jitSecretName,
-				},
-				Key: JitConfigSecretKey,
+				Name: jitSecretName,
+				Key:  JitConfigSecretKey,
 			},
 		},
 	}
@@ -61,12 +58,10 @@ func BuildRunnerPod(namespace string, scaleSet *ghav1alpha1.RunnerScaleSet, runn
 	maps.Copy(annotations, template.Annotations)
 
 	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        runner.Spec.RunnerName,
-			Namespace:   namespace,
-			Labels:      labels,
-			Annotations: annotations,
-		},
-		Spec: *podSpec,
+		Name:        runner.Spec.RunnerName,
+		Namespace:   namespace,
+		Labels:      labels,
+		Annotations: annotations,
+		Spec:        *podSpec,
 	}
 }

@@ -22,15 +22,12 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestRunnerMachineDefaulting(t *testing.T) {
 	m := &RunnerMachine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-machine",
-			Namespace: "default",
-		},
+		Name:      "test-machine",
+		Namespace: "default",
 		Spec: RunnerMachineSpec{
 			ClusterRef:         corev1.LocalObjectReference{Name: "test-cluster"},
 			KubernetesNodeName: "node-1",
@@ -111,10 +108,8 @@ func TestRunnerMachineValidateCreate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &RunnerMachine{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-machine",
-					Namespace: "default",
-				},
+				Name:      "test-machine",
+				Namespace: "default",
 				Spec: RunnerMachineSpec{
 					ClusterRef:         corev1.LocalObjectReference{Name: "test-cluster"},
 					KubernetesNodeName: "node-1",
@@ -137,10 +132,8 @@ func TestRunnerMachineValidateCreate(t *testing.T) {
 
 func TestRunnerMachineValidateUpdate(t *testing.T) {
 	oldMachine := &RunnerMachine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-machine",
-			Namespace: "default",
-		},
+		Name:      "test-machine",
+		Namespace: "default",
 		Spec: RunnerMachineSpec{
 			ClusterRef:         corev1.LocalObjectReference{Name: "test-cluster"},
 			KubernetesNodeName: "node-1",

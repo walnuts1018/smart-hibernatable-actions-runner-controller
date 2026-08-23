@@ -4,7 +4,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 )
@@ -20,18 +19,16 @@ func BuildJitSecret(namespace string, runner *ghav1alpha1.EphemeralRunner, jitCo
 	secretName := JitSecretName(runner.Spec.RunnerName)
 	expiresAt := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      secretName,
-			Namespace: namespace,
-			Labels: map[string]string{
-				LabelManagedBy:    LabelManagedByValue,
-				LabelRunnerUID:    string(runner.UID),
-				LabelRunnerName:   runner.Spec.RunnerName,
-				LabelScaleSetName: runner.Spec.ScaleSetRef.Name,
-			},
-			Annotations: map[string]string{
-				AnnotationExpiresAt: expiresAt,
-			},
+		Name:      secretName,
+		Namespace: namespace,
+		Labels: map[string]string{
+			LabelManagedBy:    LabelManagedByValue,
+			LabelRunnerUID:    string(runner.UID),
+			LabelRunnerName:   runner.Spec.RunnerName,
+			LabelScaleSetName: runner.Spec.ScaleSetRef.Name,
+		},
+		Annotations: map[string]string{
+			AnnotationExpiresAt: expiresAt,
 		},
 		Type:      corev1.SecretTypeOpaque,
 		Immutable: new(true),

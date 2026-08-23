@@ -27,10 +27,8 @@ import (
 
 func TestRunnerClusterDefaulting(t *testing.T) {
 	cluster := &RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-cluster",
-			Namespace: "default",
-		},
+		Name:      "test-cluster",
+		Namespace: "default",
 		Spec: RunnerClusterSpec{
 			KubeconfigSecretRef: corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{Name: "cluster-kubeconfig"},
@@ -91,10 +89,8 @@ func TestRunnerClusterValidateCreate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cluster := &RunnerCluster{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-cluster",
-					Namespace: "default",
-				},
+				Name:      "test-cluster",
+				Namespace: "default",
 				Spec: RunnerClusterSpec{
 					KubeconfigSecretRef: corev1.SecretKeySelector{
 						LocalObjectReference: corev1.LocalObjectReference{Name: "cluster-kubeconfig"},
@@ -115,10 +111,8 @@ func TestRunnerClusterValidateCreate(t *testing.T) {
 
 func TestRunnerClusterValidateUpdate(t *testing.T) {
 	oldCluster := &RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-cluster",
-			Namespace: "default",
-		},
+		Name:      "test-cluster",
+		Namespace: "default",
 		Spec: RunnerClusterSpec{
 			KubeconfigSecretRef: corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{Name: "cluster-kubeconfig"},

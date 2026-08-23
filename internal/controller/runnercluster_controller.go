@@ -180,10 +180,8 @@ func (r *RunnerClusterReconciler) findClustersForMachine(ctx context.Context, ob
 
 	return []ctrl.Request{
 		{
-			NamespacedName: client.ObjectKey{
-				Namespace: m.Namespace,
-				Name:      m.Spec.ClusterRef.Name,
-			},
+			Namespace: m.Namespace,
+			Name:      m.Spec.ClusterRef.Name,
 		},
 	}
 }

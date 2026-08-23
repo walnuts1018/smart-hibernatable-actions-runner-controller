@@ -3,8 +3,6 @@ package capacity
 import (
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 )
 
@@ -23,7 +21,7 @@ func TestOrderedCapacityPlanner_Plan(t *testing.T) {
 			enableMultiNode: false,
 			machines: []MachineCapacity{
 				{
-					Machine:   &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "m1"}},
+					Machine:   &ghav1alpha1.RunnerMachine{Name: "m1"},
 					Capacity:  2,
 					Priority:  100,
 					Bootstrap: true,
@@ -40,7 +38,7 @@ func TestOrderedCapacityPlanner_Plan(t *testing.T) {
 			enableMultiNode: false,
 			machines: []MachineCapacity{
 				{
-					Machine:   &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "m1"}},
+					Machine:   &ghav1alpha1.RunnerMachine{Name: "m1"},
 					Capacity:  2,
 					Priority:  100,
 					Bootstrap: true,
@@ -57,13 +55,13 @@ func TestOrderedCapacityPlanner_Plan(t *testing.T) {
 			enableMultiNode: false,
 			machines: []MachineCapacity{
 				{
-					Machine:   &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "m1"}},
+					Machine:   &ghav1alpha1.RunnerMachine{Name: "m1"},
 					Capacity:  2,
 					Priority:  100,
 					Bootstrap: true,
 				},
 				{
-					Machine:   &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "m2"}},
+					Machine:   &ghav1alpha1.RunnerMachine{Name: "m2"},
 					Capacity:  2,
 					Priority:  200,
 					Bootstrap: false,
@@ -77,19 +75,19 @@ func TestOrderedCapacityPlanner_Plan(t *testing.T) {
 			enableMultiNode: true,
 			machines: []MachineCapacity{
 				{
-					Machine:   &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "worker2"}},
+					Machine:   &ghav1alpha1.RunnerMachine{Name: "worker2"},
 					Capacity:  4,
 					Priority:  300,
 					Bootstrap: false,
 				},
 				{
-					Machine:   &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "bootstrap"}},
+					Machine:   &ghav1alpha1.RunnerMachine{Name: "bootstrap"},
 					Capacity:  2,
 					Priority:  100,
 					Bootstrap: true,
 				},
 				{
-					Machine:   &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "worker1"}},
+					Machine:   &ghav1alpha1.RunnerMachine{Name: "worker1"},
 					Capacity:  2,
 					Priority:  200,
 					Bootstrap: false,
@@ -105,14 +103,14 @@ func TestOrderedCapacityPlanner_Plan(t *testing.T) {
 			enableMultiNode: true,
 			machines: []MachineCapacity{
 				{
-					Machine:     &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "bootstrap"}},
+					Machine:     &ghav1alpha1.RunnerMachine{Name: "bootstrap"},
 					Capacity:    2,
 					Priority:    100,
 					Bootstrap:   true,
 					Quarantined: true, // quarantined!
 				},
 				{
-					Machine:     &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "worker1-broken"}},
+					Machine:     &ghav1alpha1.RunnerMachine{Name: "worker1-broken"},
 					Capacity:    4,
 					Priority:    200,
 					Bootstrap:   false,
@@ -129,14 +127,14 @@ func TestOrderedCapacityPlanner_Plan(t *testing.T) {
 			enableMultiNode: true,
 			machines: []MachineCapacity{
 				{
-					Machine:     &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "bootstrap"}},
+					Machine:     &ghav1alpha1.RunnerMachine{Name: "bootstrap"},
 					Capacity:    2,
 					Priority:    100,
 					Bootstrap:   true,
 					Maintenance: true, // under maintenance!
 				},
 				{
-					Machine:     &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "worker1"}},
+					Machine:     &ghav1alpha1.RunnerMachine{Name: "worker1"},
 					Capacity:    4,
 					Priority:    200,
 					Bootstrap:   false,

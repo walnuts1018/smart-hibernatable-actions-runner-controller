@@ -492,10 +492,8 @@ func (r *EphemeralRunnerReconciler) findRunnersForCluster(ctx context.Context, o
 	for _, run := range runners.Items {
 		if run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseWaitingForCluster || run.Status.Phase == ghav1alpha1.EphemeralRunnerPhasePending {
 			requests = append(requests, ctrl.Request{
-				NamespacedName: client.ObjectKey{
-					Namespace: run.Namespace,
-					Name:      run.Name,
-				},
+				Namespace: run.Namespace,
+				Name:      run.Name,
 			})
 		}
 	}
@@ -517,10 +515,8 @@ func (r *EphemeralRunnerReconciler) findRunnersForNodePool(ctx context.Context, 
 	for _, run := range runners.Items {
 		if run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseWaitingForCluster || run.Status.Phase == ghav1alpha1.EphemeralRunnerPhasePending {
 			requests = append(requests, ctrl.Request{
-				NamespacedName: client.ObjectKey{
-					Namespace: run.Namespace,
-					Name:      run.Name,
-				},
+				Namespace: run.Namespace,
+				Name:      run.Name,
 			})
 		}
 	}

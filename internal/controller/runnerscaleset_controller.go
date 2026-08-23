@@ -636,14 +636,12 @@ func (r *RunnerScaleSetReconciler) reconcileRunners(ctx context.Context, ss *gha
 		for range diff {
 			runnerName := runner.GenerateRunnerName(ss.Name)
 			newRunner := &ghav1alpha1.EphemeralRunner{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      runnerName,
-					Namespace: ss.Namespace,
-					Labels: map[string]string{
-						runner.LabelManagedBy:    runner.LabelManagedByValue,
-						runner.LabelScaleSetUID:  string(ss.UID),
-						runner.LabelScaleSetName: ss.Name,
-					},
+				Name:      runnerName,
+				Namespace: ss.Namespace,
+				Labels: map[string]string{
+					runner.LabelManagedBy:    runner.LabelManagedByValue,
+					runner.LabelScaleSetUID:  string(ss.UID),
+					runner.LabelScaleSetName: ss.Name,
 				},
 				Spec: ghav1alpha1.EphemeralRunnerSpec{
 					ScaleSetRef: corev1.LocalObjectReference{
@@ -738,10 +736,8 @@ func (r *RunnerScaleSetReconciler) findScaleSetsForNodePool(ctx context.Context,
 		for _, ss := range scaleSets.Items {
 			if ss.Spec.NodePoolRef.Name == nodePool.Name {
 				requests = append(requests, ctrl.Request{
-					NamespacedName: client.ObjectKey{
-						Namespace: ss.Namespace,
-						Name:      ss.Name,
-					},
+					Namespace: ss.Namespace,
+					Name:      ss.Name,
 				})
 			}
 		}
@@ -751,10 +747,8 @@ func (r *RunnerScaleSetReconciler) findScaleSetsForNodePool(ctx context.Context,
 	var requests []ctrl.Request
 	for _, ss := range scaleSets.Items {
 		requests = append(requests, ctrl.Request{
-			NamespacedName: client.ObjectKey{
-				Namespace: ss.Namespace,
-				Name:      ss.Name,
-			},
+			Namespace: ss.Namespace,
+			Name:      ss.Name,
 		})
 	}
 	return requests

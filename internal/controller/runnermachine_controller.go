@@ -684,10 +684,8 @@ func (r *RunnerMachineReconciler) findMachinesForNodePool(ctx context.Context, o
 	var requests []ctrl.Request
 	for _, m := range machineList.Items {
 		requests = append(requests, ctrl.Request{
-			NamespacedName: client.ObjectKey{
-				Namespace: m.Namespace,
-				Name:      m.Name,
-			},
+			Namespace: m.Namespace,
+			Name:      m.Name,
 		})
 	}
 	return requests
@@ -710,10 +708,8 @@ func (r *RunnerMachineReconciler) findMachinesForCluster(ctx context.Context, ob
 		for _, m := range machineList.Items {
 			if m.Spec.ClusterRef.Name == cluster.Name {
 				requests = append(requests, ctrl.Request{
-					NamespacedName: client.ObjectKey{
-						Namespace: m.Namespace,
-						Name:      m.Name,
-					},
+					Namespace: m.Namespace,
+					Name:      m.Name,
 				})
 			}
 		}
@@ -723,10 +719,8 @@ func (r *RunnerMachineReconciler) findMachinesForCluster(ctx context.Context, ob
 	var requests []ctrl.Request
 	for _, m := range machineList.Items {
 		requests = append(requests, ctrl.Request{
-			NamespacedName: client.ObjectKey{
-				Namespace: m.Namespace,
-				Name:      m.Name,
-			},
+			Namespace: m.Namespace,
+			Name:      m.Name,
 		})
 	}
 	return requests

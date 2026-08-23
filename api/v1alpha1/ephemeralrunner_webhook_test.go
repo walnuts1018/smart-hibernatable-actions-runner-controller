@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestEphemeralRunnerValidateCreate(t *testing.T) {
@@ -61,10 +60,8 @@ func TestEphemeralRunnerValidateCreate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			runner := &EphemeralRunner{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-runner-abc",
-					Namespace: "default",
-				},
+				Name:      "test-runner-abc",
+				Namespace: "default",
 				Spec: EphemeralRunnerSpec{
 					ScaleSetRef: corev1.LocalObjectReference{Name: "test-scaleset"},
 					RunnerName:  "test-runner-abc",
@@ -82,10 +79,8 @@ func TestEphemeralRunnerValidateCreate(t *testing.T) {
 
 func TestEphemeralRunnerValidateUpdate(t *testing.T) {
 	oldRunner := &EphemeralRunner{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-runner-abc",
-			Namespace: "default",
-		},
+		Name:      "test-runner-abc",
+		Namespace: "default",
 		Spec: EphemeralRunnerSpec{
 			ScaleSetRef: corev1.LocalObjectReference{Name: "test-scaleset"},
 			RunnerName:  "test-runner-abc",

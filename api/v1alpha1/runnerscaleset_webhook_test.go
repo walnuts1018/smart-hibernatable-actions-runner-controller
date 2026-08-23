@@ -21,15 +21,12 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestRunnerScaleSetDefaulting(t *testing.T) {
 	ss := &RunnerScaleSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-scaleset",
-			Namespace: "default",
-		},
+		Name:      "test-scaleset",
+		Namespace: "default",
 		Spec: RunnerScaleSetSpec{
 			GitHub: GitHubScaleSetSpec{
 				ConfigURL:            "https://github.com/example-org",
@@ -170,10 +167,8 @@ func TestRunnerScaleSetValidateCreate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ss := &RunnerScaleSet{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-scaleset",
-					Namespace: "default",
-				},
+				Name:      "test-scaleset",
+				Namespace: "default",
 				Spec: RunnerScaleSetSpec{
 					GitHub: GitHubScaleSetSpec{
 						ConfigURL:            "https://github.com/example-org",
@@ -211,10 +206,8 @@ func TestRunnerScaleSetValidateCreate(t *testing.T) {
 
 func TestRunnerScaleSetValidateUpdate(t *testing.T) {
 	oldSS := &RunnerScaleSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-scaleset",
-			Namespace: "default",
-		},
+		Name:      "test-scaleset",
+		Namespace: "default",
 		Spec: RunnerScaleSetSpec{
 			GitHub: GitHubScaleSetSpec{
 				ConfigURL:            "https://github.com/example-org",

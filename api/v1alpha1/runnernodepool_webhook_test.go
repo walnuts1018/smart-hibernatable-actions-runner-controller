@@ -27,10 +27,8 @@ import (
 
 func TestRunnerNodePoolDefaulting(t *testing.T) {
 	pool := &RunnerNodePool{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pool",
-			Namespace: "default",
-		},
+		Name:      "test-pool",
+		Namespace: "default",
 		Spec: RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "test-cluster"},
 			MachineSelector: metav1.LabelSelector{
@@ -102,10 +100,8 @@ func TestRunnerNodePoolValidateCreate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pool := &RunnerNodePool{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pool",
-					Namespace: "default",
-				},
+				Name:      "test-pool",
+				Namespace: "default",
 				Spec: RunnerNodePoolSpec{
 					ClusterRef: corev1.LocalObjectReference{Name: "test-cluster"},
 					MachineSelector: metav1.LabelSelector{
@@ -130,10 +126,8 @@ func TestRunnerNodePoolValidateCreate(t *testing.T) {
 
 func TestRunnerNodePoolValidateUpdate(t *testing.T) {
 	oldPool := &RunnerNodePool{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pool",
-			Namespace: "default",
-		},
+		Name:      "test-pool",
+		Namespace: "default",
 		Spec: RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "test-cluster"},
 			MachineSelector: metav1.LabelSelector{

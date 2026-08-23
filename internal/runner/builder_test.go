@@ -4,17 +4,14 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 )
 
 func TestBuildJitSecret(t *testing.T) {
 	runner := &ghav1alpha1.EphemeralRunner{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-runner",
-			UID:  "runner-uid-123",
-		},
+		Name: "test-runner",
+		UID:  "runner-uid-123",
 		Spec: ghav1alpha1.EphemeralRunnerSpec{
 			RunnerName: "test-runner",
 			ScaleSetRef: corev1.LocalObjectReference{
@@ -35,10 +32,8 @@ func TestBuildJitSecret(t *testing.T) {
 
 func TestBuildRunnerPod(t *testing.T) {
 	scaleSet := &ghav1alpha1.RunnerScaleSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-scaleset",
-			UID:  "scaleset-uid-123",
-		},
+		Name: "test-scaleset",
+		UID:  "scaleset-uid-123",
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
 			Runner: ghav1alpha1.RunnerTemplateSpec{
 				ContainerName: "runner",
@@ -58,10 +53,8 @@ func TestBuildRunnerPod(t *testing.T) {
 	}
 
 	epRunner := &ghav1alpha1.EphemeralRunner{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-runner",
-			UID:  "runner-uid-123",
-		},
+		Name: "test-runner",
+		UID:  "runner-uid-123",
 		Spec: ghav1alpha1.EphemeralRunnerSpec{
 			RunnerName: "test-runner",
 		},

@@ -24,7 +24,7 @@ func TestEphemeralRunnerReconciler_WaitingForCluster(t *testing.T) {
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Name: "c1", Namespace: "default",
 		Status: ghav1alpha1.RunnerClusterStatus{
 			Phase:        ghav1alpha1.RunnerClusterPhaseStarting,
 			APIReachable: false,
@@ -32,7 +32,7 @@ func TestEphemeralRunnerReconciler_WaitingForCluster(t *testing.T) {
 	}
 
 	nodePool := &ghav1alpha1.RunnerNodePool{
-		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
 		},
@@ -42,7 +42,7 @@ func TestEphemeralRunnerReconciler_WaitingForCluster(t *testing.T) {
 	}
 
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "github-app-secret", Namespace: "default"},
+		Name: "github-app-secret", Namespace: "default",
 		Data: map[string][]byte{
 			"github_app_id":              []byte("12345"),
 			"github_app_installation_id": []byte("67890"),
@@ -51,7 +51,7 @@ func TestEphemeralRunnerReconciler_WaitingForCluster(t *testing.T) {
 	}
 
 	scaleSet := &ghav1alpha1.RunnerScaleSet{
-		ObjectMeta: metav1.ObjectMeta{Name: "ss1", Namespace: "default"},
+		Name: "ss1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
 			NodePoolRef: corev1.LocalObjectReference{Name: "p1"},
 			GitHub: ghav1alpha1.GitHubScaleSetSpec{
@@ -61,11 +61,9 @@ func TestEphemeralRunnerReconciler_WaitingForCluster(t *testing.T) {
 	}
 
 	epRunner := &ghav1alpha1.EphemeralRunner{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:       "ss1-runner-1",
-			Namespace:  "default",
-			Finalizers: []string{runner.FinalizerRunnerCleanup},
-		},
+		Name:       "ss1-runner-1",
+		Namespace:  "default",
+		Finalizers: []string{runner.FinalizerRunnerCleanup},
 		Spec: ghav1alpha1.EphemeralRunnerSpec{
 			ScaleSetRef: corev1.LocalObjectReference{Name: "ss1"},
 			RunnerName:  "ss1-runner-1",
@@ -91,7 +89,7 @@ func TestEphemeralRunnerReconciler_WaitingForCluster(t *testing.T) {
 	}
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-1"},
+		Namespace: "default", Name: "ss1-runner-1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -113,7 +111,7 @@ func TestEphemeralRunnerReconciler_Provisioning(t *testing.T) {
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Name: "c1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerClusterSpec{
 			RunnerNamespace: "gha-runners",
 		},
@@ -124,7 +122,7 @@ func TestEphemeralRunnerReconciler_Provisioning(t *testing.T) {
 	}
 
 	nodePool := &ghav1alpha1.RunnerNodePool{
-		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
 		},
@@ -134,7 +132,7 @@ func TestEphemeralRunnerReconciler_Provisioning(t *testing.T) {
 	}
 
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "github-app-secret", Namespace: "default"},
+		Name: "github-app-secret", Namespace: "default",
 		Data: map[string][]byte{
 			"github_app_id":              []byte("12345"),
 			"github_app_installation_id": []byte("67890"),
@@ -143,7 +141,7 @@ func TestEphemeralRunnerReconciler_Provisioning(t *testing.T) {
 	}
 
 	scaleSet := &ghav1alpha1.RunnerScaleSet{
-		ObjectMeta: metav1.ObjectMeta{Name: "ss1", Namespace: "default"},
+		Name: "ss1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
 			NodePoolRef: corev1.LocalObjectReference{Name: "p1"},
 			GitHub: ghav1alpha1.GitHubScaleSetSpec{
@@ -165,11 +163,9 @@ func TestEphemeralRunnerReconciler_Provisioning(t *testing.T) {
 	}
 
 	epRunner := &ghav1alpha1.EphemeralRunner{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:       "ss1-runner-1",
-			Namespace:  "default",
-			Finalizers: []string{runner.FinalizerRunnerCleanup},
-		},
+		Name:       "ss1-runner-1",
+		Namespace:  "default",
+		Finalizers: []string{runner.FinalizerRunnerCleanup},
 		Spec: ghav1alpha1.EphemeralRunnerSpec{
 			ScaleSetRef: corev1.LocalObjectReference{Name: "ss1"},
 			RunnerName:  "ss1-runner-1",
@@ -202,7 +198,7 @@ func TestEphemeralRunnerReconciler_Provisioning(t *testing.T) {
 
 	// 1回目のReconcile: Attemptの事前永続化
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-1"},
+		Namespace: "default", Name: "ss1-runner-1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -210,7 +206,7 @@ func TestEphemeralRunnerReconciler_Provisioning(t *testing.T) {
 
 	// 2回目のReconcile: JIT生成とリモートPod/Secret作成
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-1"},
+		Namespace: "default", Name: "ss1-runner-1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -234,7 +230,7 @@ func TestEphemeralRunnerReconciler_OrphanRunnerRecovery(t *testing.T) {
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Name: "c1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerClusterSpec{
 			RunnerNamespace: "gha-runners",
 		},
@@ -245,7 +241,7 @@ func TestEphemeralRunnerReconciler_OrphanRunnerRecovery(t *testing.T) {
 	}
 
 	nodePool := &ghav1alpha1.RunnerNodePool{
-		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
 		},
@@ -255,7 +251,7 @@ func TestEphemeralRunnerReconciler_OrphanRunnerRecovery(t *testing.T) {
 	}
 
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "github-app-secret", Namespace: "default"},
+		Name: "github-app-secret", Namespace: "default",
 		Data: map[string][]byte{
 			"github_app_id":              []byte("12345"),
 			"github_app_installation_id": []byte("67890"),
@@ -264,7 +260,7 @@ func TestEphemeralRunnerReconciler_OrphanRunnerRecovery(t *testing.T) {
 	}
 
 	scaleSet := &ghav1alpha1.RunnerScaleSet{
-		ObjectMeta: metav1.ObjectMeta{Name: "ss1", Namespace: "default"},
+		Name: "ss1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
 			NodePoolRef: corev1.LocalObjectReference{Name: "p1"},
 			GitHub: ghav1alpha1.GitHubScaleSetSpec{
@@ -287,11 +283,9 @@ func TestEphemeralRunnerReconciler_OrphanRunnerRecovery(t *testing.T) {
 
 	now := metav1.Now()
 	epRunner := &ghav1alpha1.EphemeralRunner{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:       "ss1-runner-orphan",
-			Namespace:  "default",
-			Finalizers: []string{runner.FinalizerRunnerCleanup},
-		},
+		Name:       "ss1-runner-orphan",
+		Namespace:  "default",
+		Finalizers: []string{runner.FinalizerRunnerCleanup},
 		Spec: ghav1alpha1.EphemeralRunnerSpec{
 			ScaleSetRef: corev1.LocalObjectReference{Name: "ss1"},
 			RunnerName:  "ss1-runner-orphan",
@@ -335,7 +329,7 @@ func TestEphemeralRunnerReconciler_OrphanRunnerRecovery(t *testing.T) {
 
 	// Reconcile: GitHub上の孤立Runner(ID:777)がRemoveRunnerされ、新しくJITが生成されること
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-orphan"},
+		Namespace: "default", Name: "ss1-runner-orphan",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -352,7 +346,7 @@ func TestEphemeralRunnerReconciler_IdempotentProvisioningWithExistingSecret(t *t
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Name: "c1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerClusterSpec{
 			RunnerNamespace: "gha-runners",
 		},
@@ -363,7 +357,7 @@ func TestEphemeralRunnerReconciler_IdempotentProvisioningWithExistingSecret(t *t
 	}
 
 	nodePool := &ghav1alpha1.RunnerNodePool{
-		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
 		},
@@ -373,7 +367,7 @@ func TestEphemeralRunnerReconciler_IdempotentProvisioningWithExistingSecret(t *t
 	}
 
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "github-app-secret", Namespace: "default"},
+		Name: "github-app-secret", Namespace: "default",
 		Data: map[string][]byte{
 			"github_app_id":              []byte("12345"),
 			"github_app_installation_id": []byte("67890"),
@@ -382,7 +376,7 @@ func TestEphemeralRunnerReconciler_IdempotentProvisioningWithExistingSecret(t *t
 	}
 
 	scaleSet := &ghav1alpha1.RunnerScaleSet{
-		ObjectMeta: metav1.ObjectMeta{Name: "ss1", Namespace: "default"},
+		Name: "ss1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
 			NodePoolRef: corev1.LocalObjectReference{Name: "p1"},
 			GitHub: ghav1alpha1.GitHubScaleSetSpec{
@@ -404,12 +398,10 @@ func TestEphemeralRunnerReconciler_IdempotentProvisioningWithExistingSecret(t *t
 	}
 
 	epRunner := &ghav1alpha1.EphemeralRunner{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:       "ss1-runner-1",
-			Namespace:  "default",
-			UID:        "runner-uid-1",
-			Finalizers: []string{runner.FinalizerRunnerCleanup},
-		},
+		Name:       "ss1-runner-1",
+		Namespace:  "default",
+		UID:        "runner-uid-1",
+		Finalizers: []string{runner.FinalizerRunnerCleanup},
 		Spec: ghav1alpha1.EphemeralRunnerSpec{
 			ScaleSetRef: corev1.LocalObjectReference{Name: "ss1"},
 			RunnerName:  "ss1-runner-1",
@@ -427,12 +419,10 @@ func TestEphemeralRunnerReconciler_IdempotentProvisioningWithExistingSecret(t *t
 
 	// 既にSecretが存在するケース（前回のReconcileでSecret作成後にクラッシュした場合の再現）
 	existingSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "ss1-runner-1-jit",
-			Namespace: "gha-runners",
-			Labels: map[string]string{
-				runner.LabelRunnerUID: "runner-uid-1",
-			},
+		Name:      "ss1-runner-1-jit",
+		Namespace: "gha-runners",
+		Labels: map[string]string{
+			runner.LabelRunnerUID: "runner-uid-1",
 		},
 		Data: map[string][]byte{
 			runner.JitConfigSecretKey: []byte("existing-jit-config"),
@@ -458,7 +448,7 @@ func TestEphemeralRunnerReconciler_IdempotentProvisioningWithExistingSecret(t *t
 
 	// 1回目のReconcile: Attempt初期化
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-1"},
+		Namespace: "default", Name: "ss1-runner-1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -466,7 +456,7 @@ func TestEphemeralRunnerReconciler_IdempotentProvisioningWithExistingSecret(t *t
 
 	// 2回目のReconcile: 既存Secretの再利用とPod作成
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-1"},
+		Namespace: "default", Name: "ss1-runner-1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -493,7 +483,7 @@ func TestEphemeralRunnerReconciler_PodFailedSnapshotAndTTL(t *testing.T) {
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Name: "c1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerClusterSpec{
 			RunnerNamespace: "gha-runners",
 		},
@@ -504,7 +494,7 @@ func TestEphemeralRunnerReconciler_PodFailedSnapshotAndTTL(t *testing.T) {
 	}
 
 	nodePool := &ghav1alpha1.RunnerNodePool{
-		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
 		},
@@ -514,18 +504,16 @@ func TestEphemeralRunnerReconciler_PodFailedSnapshotAndTTL(t *testing.T) {
 	}
 
 	scaleSet := &ghav1alpha1.RunnerScaleSet{
-		ObjectMeta: metav1.ObjectMeta{Name: "ss1", Namespace: "default"},
+		Name: "ss1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
 			NodePoolRef: corev1.LocalObjectReference{Name: "p1"},
 		},
 	}
 
 	epRunner := &ghav1alpha1.EphemeralRunner{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:       "ss1-runner-failed",
-			Namespace:  "default",
-			Finalizers: []string{runner.FinalizerRunnerCleanup},
-		},
+		Name:       "ss1-runner-failed",
+		Namespace:  "default",
+		Finalizers: []string{runner.FinalizerRunnerCleanup},
 		Spec: ghav1alpha1.EphemeralRunnerSpec{
 			ScaleSetRef: corev1.LocalObjectReference{Name: "ss1"},
 			RunnerName:  "ss1-runner-failed",
@@ -542,10 +530,8 @@ func TestEphemeralRunnerReconciler_PodFailedSnapshotAndTTL(t *testing.T) {
 		Build()
 
 	failedPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "ss1-runner-failed",
-			Namespace: "gha-runners",
-		},
+		Name:      "ss1-runner-failed",
+		Namespace: "gha-runners",
 		Status: corev1.PodStatus{
 			Phase: corev1.PodFailed,
 			ContainerStatuses: []corev1.ContainerStatus{
@@ -576,7 +562,7 @@ func TestEphemeralRunnerReconciler_PodFailedSnapshotAndTTL(t *testing.T) {
 
 	// 1回目のReconcile: PodFailedを検知してStatus.Failureを記録し、リモートリソースを即削除、CRは保持
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-failed"},
+		Namespace: "default", Name: "ss1-runner-failed",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -610,7 +596,7 @@ func TestEphemeralRunnerReconciler_PodFailedSnapshotAndTTL(t *testing.T) {
 	_ = fakeClient.Status().Update(context.Background(), &updatedRunner)
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-failed"},
+		Namespace: "default", Name: "ss1-runner-failed",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -618,7 +604,7 @@ func TestEphemeralRunnerReconciler_PodFailedSnapshotAndTTL(t *testing.T) {
 
 	// 3回目のReconcile: DeletionTimestampが付いたオブジェクトのFinalizer除去が完了して完全に削除される
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-failed"},
+		Namespace: "default", Name: "ss1-runner-failed",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -638,7 +624,7 @@ func TestEphemeralRunnerReconciler_PodCompletedTTL(t *testing.T) {
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Name: "c1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerClusterSpec{
 			RunnerNamespace: "gha-runners",
 		},
@@ -649,7 +635,7 @@ func TestEphemeralRunnerReconciler_PodCompletedTTL(t *testing.T) {
 	}
 
 	nodePool := &ghav1alpha1.RunnerNodePool{
-		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
 		},
@@ -659,18 +645,16 @@ func TestEphemeralRunnerReconciler_PodCompletedTTL(t *testing.T) {
 	}
 
 	scaleSet := &ghav1alpha1.RunnerScaleSet{
-		ObjectMeta: metav1.ObjectMeta{Name: "ss1", Namespace: "default"},
+		Name: "ss1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
 			NodePoolRef: corev1.LocalObjectReference{Name: "p1"},
 		},
 	}
 
 	epRunner := &ghav1alpha1.EphemeralRunner{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:       "ss1-runner-completed",
-			Namespace:  "default",
-			Finalizers: []string{runner.FinalizerRunnerCleanup},
-		},
+		Name:       "ss1-runner-completed",
+		Namespace:  "default",
+		Finalizers: []string{runner.FinalizerRunnerCleanup},
 		Spec: ghav1alpha1.EphemeralRunnerSpec{
 			ScaleSetRef: corev1.LocalObjectReference{Name: "ss1"},
 			RunnerName:  "ss1-runner-completed",
@@ -687,10 +671,8 @@ func TestEphemeralRunnerReconciler_PodCompletedTTL(t *testing.T) {
 		Build()
 
 	completedPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "ss1-runner-completed",
-			Namespace: "gha-runners",
-		},
+		Name:      "ss1-runner-completed",
+		Namespace: "gha-runners",
 		Status: corev1.PodStatus{
 			Phase: corev1.PodSucceeded,
 		},
@@ -709,7 +691,7 @@ func TestEphemeralRunnerReconciler_PodCompletedTTL(t *testing.T) {
 
 	// 1回目のReconcile: PodSucceededを検知してCompletedに遷移し、リモートリソースを削除、CRはTTL保持
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-completed"},
+		Namespace: "default", Name: "ss1-runner-completed",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -733,7 +715,7 @@ func TestEphemeralRunnerReconciler_PodCompletedTTL(t *testing.T) {
 	_ = fakeClient.Status().Update(context.Background(), &updatedRunner)
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-completed"},
+		Namespace: "default", Name: "ss1-runner-completed",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -741,7 +723,7 @@ func TestEphemeralRunnerReconciler_PodCompletedTTL(t *testing.T) {
 
 	// 3回目のReconcile: DeletionTimestampが付いたオブジェクトのFinalizer除去が完了して完全に削除される
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-completed"},
+		Namespace: "default", Name: "ss1-runner-completed",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

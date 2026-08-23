@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -21,10 +20,8 @@ func TestRunnerClusterReconciler(t *testing.T) {
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-cluster",
-			Namespace: "default",
-		},
+		Name:      "test-cluster",
+		Namespace: "default",
 		Spec: ghav1alpha1.RunnerClusterSpec{
 			KubeconfigSecretRef: corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{Name: "test-kubeconfig"},
@@ -34,10 +31,8 @@ func TestRunnerClusterReconciler(t *testing.T) {
 	}
 
 	machine := &ghav1alpha1.RunnerMachine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "m1",
-			Namespace: "default",
-		},
+		Name:      "m1",
+		Namespace: "default",
 		Spec: ghav1alpha1.RunnerMachineSpec{
 			ClusterRef:         corev1.LocalObjectReference{Name: "test-cluster"},
 			KubernetesNodeName: "node1",
@@ -57,7 +52,7 @@ func TestRunnerClusterReconciler(t *testing.T) {
 	}
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "test-cluster"},
+		Namespace: "default", Name: "test-cluster",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -82,17 +77,13 @@ func TestRunnerClusterReconciler_ShortCircuitOffline(t *testing.T) {
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-cluster",
-			Namespace: "default",
-		},
+		Name:      "test-cluster",
+		Namespace: "default",
 	}
 
 	machine := &ghav1alpha1.RunnerMachine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "m1",
-			Namespace: "default",
-		},
+		Name:      "m1",
+		Namespace: "default",
 		Spec: ghav1alpha1.RunnerMachineSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "test-cluster"},
 		},
@@ -112,7 +103,7 @@ func TestRunnerClusterReconciler_ShortCircuitOffline(t *testing.T) {
 	}
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "test-cluster"},
+		Namespace: "default", Name: "test-cluster",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -165,10 +156,10 @@ func TestRunnerClusterReconciler_Phases(t *testing.T) {
 			_ = ghav1alpha1.AddToScheme(scheme)
 
 			cluster := &ghav1alpha1.RunnerCluster{
-				ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+				Name: "c1", Namespace: "default",
 			}
 			machine := &ghav1alpha1.RunnerMachine{
-				ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "default"},
+				Name: "m1", Namespace: "default",
 				Spec: ghav1alpha1.RunnerMachineSpec{
 					ClusterRef: corev1.LocalObjectReference{Name: "c1"},
 				},
@@ -187,7 +178,7 @@ func TestRunnerClusterReconciler_Phases(t *testing.T) {
 			}
 
 			_, err := r.Reconcile(context.Background(), ctrl.Request{
-				NamespacedName: client.ObjectKey{Namespace: "default", Name: "c1"},
+				Namespace: "default", Name: "c1",
 			})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)

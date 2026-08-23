@@ -24,10 +24,8 @@ func TestRunnerScaleSetReconciler(t *testing.T) {
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "github-app-secret",
-			Namespace: "default",
-		},
+		Name:      "github-app-secret",
+		Namespace: "default",
 		Data: map[string][]byte{
 			"github_app_id":              []byte("12345"),
 			"github_app_installation_id": []byte("67890"),
@@ -36,10 +34,8 @@ func TestRunnerScaleSetReconciler(t *testing.T) {
 	}
 
 	nodePool := &ghav1alpha1.RunnerNodePool{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "pool1",
-			Namespace: "default",
-		},
+		Name:      "pool1",
+		Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			MachineSelector: metav1.LabelSelector{
 				MatchLabels: map[string]string{"pool": "pool1"},
@@ -48,22 +44,18 @@ func TestRunnerScaleSetReconciler(t *testing.T) {
 	}
 
 	machine := &ghav1alpha1.RunnerMachine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "m1",
-			Namespace: "default",
-			Labels:    map[string]string{"pool": "pool1"},
-		},
+		Name:      "m1",
+		Namespace: "default",
+		Labels:    map[string]string{"pool": "pool1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
 			Capacity: ghav1alpha1.RunnerMachineCapacity{Runners: 4},
 		},
 	}
 
 	scaleSet := &ghav1alpha1.RunnerScaleSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:       "test-ss",
-			Namespace:  "default",
-			Finalizers: []string{runner.FinalizerScaleSetCleanup},
-		},
+		Name:       "test-ss",
+		Namespace:  "default",
+		Finalizers: []string{runner.FinalizerScaleSetCleanup},
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
 			GitHub: ghav1alpha1.GitHubScaleSetSpec{
 				ConfigURL:            "https://github.com/example-org",
@@ -101,7 +93,7 @@ func TestRunnerScaleSetReconciler(t *testing.T) {
 	}
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "test-ss"},
+		Namespace: "default", Name: "test-ss",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -157,12 +149,10 @@ func TestRunnerScaleSetReconciler_DeletionWithSecretMissingAndOrphanOverride(t *
 	now := metav1.Now()
 	// Case 1: Secretが欠落しており、orphan overrideがない場合 -> Finalizerは維持されて削除ブロック
 	scaleSet := &ghav1alpha1.RunnerScaleSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "test-ss",
-			Namespace:         "default",
-			Finalizers:        []string{runner.FinalizerScaleSetCleanup},
-			DeletionTimestamp: &now,
-		},
+		Name:              "test-ss",
+		Namespace:         "default",
+		Finalizers:        []string{runner.FinalizerScaleSetCleanup},
+		DeletionTimestamp: &now,
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
 			GitHub: ghav1alpha1.GitHubScaleSetSpec{
 				ConfigURL:            "https://github.com/example-org",
@@ -187,7 +177,7 @@ func TestRunnerScaleSetReconciler_DeletionWithSecretMissingAndOrphanOverride(t *
 	}
 
 	res, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "test-ss"},
+		Namespace: "default", Name: "test-ss",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error during deletion reconciliation: %v", err)
@@ -211,7 +201,7 @@ func TestRunnerScaleSetReconciler_DeletionWithSecretMissingAndOrphanOverride(t *
 	_ = fakeClient.Update(context.Background(), &updated)
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "test-ss"},
+		Namespace: "default", Name: "test-ss",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

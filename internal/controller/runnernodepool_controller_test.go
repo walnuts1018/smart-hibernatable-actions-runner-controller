@@ -23,16 +23,14 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Name: "c1", Namespace: "default",
 	}
 
 	machine1 := &ghav1alpha1.RunnerMachine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "m1",
-			Namespace: "default",
-			UID:       "uid-m1",
-			Labels:    map[string]string{"pool": "p1"},
-		},
+		Name:      "m1",
+		Namespace: "default",
+		UID:       "uid-m1",
+		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
 			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
 			KubernetesNodeName: "node1",
@@ -46,12 +44,10 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 	}
 
 	machine2 := &ghav1alpha1.RunnerMachine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "m2",
-			Namespace: "default",
-			UID:       "uid-m2",
-			Labels:    map[string]string{"pool": "p1"},
-		},
+		Name:      "m2",
+		Namespace: "default",
+		UID:       "uid-m2",
+		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
 			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
 			KubernetesNodeName: "node2",
@@ -65,7 +61,7 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 	}
 
 	nodePool := &ghav1alpha1.RunnerNodePool{
-		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
 			MachineSelector: metav1.LabelSelector{
@@ -76,7 +72,7 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 
 	now := metav1.Now()
 	scaleSet := &ghav1alpha1.RunnerScaleSet{
-		ObjectMeta: metav1.ObjectMeta{Name: "ss1", Namespace: "default"},
+		Name: "ss1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
 			NodePoolRef: corev1.LocalObjectReference{Name: "p1"},
 		},
@@ -108,7 +104,7 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 
 	// 1. 需要2の場合（Bootstrapであるm1がActive、m2がOffとして計画される）
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "p1"},
+		Namespace: "default", Name: "p1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -147,7 +143,7 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 	_ = fakeClient.Status().Update(context.Background(), scaleSet)
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "p1"},
+		Namespace: "default", Name: "p1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -177,15 +173,13 @@ func TestRunnerNodePoolReconciler_MultiNodeDisabledViolation(t *testing.T) {
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Name: "c1", Namespace: "default",
 	}
 
 	machine1 := &ghav1alpha1.RunnerMachine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "m1",
-			Namespace: "default",
-			Labels:    map[string]string{"pool": "p1"},
-		},
+		Name:      "m1",
+		Namespace: "default",
+		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
 			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
 			KubernetesNodeName: "node1",
@@ -194,11 +188,9 @@ func TestRunnerNodePoolReconciler_MultiNodeDisabledViolation(t *testing.T) {
 		},
 	}
 	machine2 := &ghav1alpha1.RunnerMachine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "m2",
-			Namespace: "default",
-			Labels:    map[string]string{"pool": "p1"},
-		},
+		Name:      "m2",
+		Namespace: "default",
+		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
 			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
 			KubernetesNodeName: "node2",
@@ -207,7 +199,7 @@ func TestRunnerNodePoolReconciler_MultiNodeDisabledViolation(t *testing.T) {
 	}
 
 	nodePool := &ghav1alpha1.RunnerNodePool{
-		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
 			MachineSelector: metav1.LabelSelector{
@@ -217,7 +209,7 @@ func TestRunnerNodePoolReconciler_MultiNodeDisabledViolation(t *testing.T) {
 	}
 
 	scaleSet := &ghav1alpha1.RunnerScaleSet{
-		ObjectMeta: metav1.ObjectMeta{Name: "ss1", Namespace: "default"},
+		Name: "ss1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
 			NodePoolRef: corev1.LocalObjectReference{Name: "p1"},
 		},
@@ -243,7 +235,7 @@ func TestRunnerNodePoolReconciler_MultiNodeDisabledViolation(t *testing.T) {
 	}
 
 	res, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: client.ObjectKey{Namespace: "default", Name: "p1"},
+		Namespace: "default", Name: "p1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
