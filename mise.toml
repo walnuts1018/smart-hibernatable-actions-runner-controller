@@ -1,8 +1,8 @@
 [tools]
 "go:sigs.k8s.io/controller-tools/cmd/controller-gen" = "0.21.0"
 "go:sigs.k8s.io/controller-runtime/tools/setup-envtest" = "0.24.1"
-"go:sigs.k8s.io/kustomize/kustomize/v5" = "5.8.1"
-"go:github.com/golangci/golangci-lint/v2/cmd/golangci-lint" = "2.12.2"
+kustomize = "5.8.1"
+golangci-lint = "2.13.1"
 kind = "0.32.0"
 kubebuilder = "4.15.0"
 kubectl = "1.36.3"
@@ -10,7 +10,7 @@ jq = "1.8.2"
 go = "1.27.0"
 shellcheck = "0.11.0"
 gh = "2.97.0"
-"npm:@devcontainers/cli" = "0.88.0"
+devcontainer-cli = "0.88.0"
 
 [tasks.manifests]
 description = "Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects"
@@ -40,7 +40,7 @@ run = 'KUBEBUILDER_ASSETS="$(setup-envtest use -p path)" go test $(go list ./...
 description = "Run linter"
 run = "golangci-lint run ./..."
 
-[tasks.lint:fix]
+[tasks."lint:fix"]
 description = "Run linter and perform fixes"
 run = "golangci-lint run --fix ./..."
 
@@ -119,5 +119,3 @@ kustomize build config/default | kubectl apply -f -
 [tasks.undeploy]
 description = "Undeploy controller from the K8s cluster specified in ~/.kube/config"
 run = 'kustomize build config/default | kubectl delete --ignore-not-found="${IGNORE_NOT_FOUND:-false}" -f -'
-
-
