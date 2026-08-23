@@ -19,13 +19,23 @@ type ScaleSetStatistics struct {
 	UpdatedAt              time.Time
 }
 
+// JITConfigResponse holds JIT configuration and assigned GitHub Runner reference.
+type JITConfigResponse struct {
+	RunnerID         int64
+	RunnerName       string
+	EncodedJITConfig string
+}
+
 // ScaleSetClient defines operations on GitHub Actions Scale Sets.
 type ScaleSetClient interface {
 	// GetOrCreateScaleSet ensures the RunnerScaleSet exists in GitHub and returns its ID.
 	GetOrCreateScaleSet(ctx context.Context, scaleSetName, runnerGroup string) (int64, error)
 
 	// GenerateJITConfig creates a JIT configuration for an ephemeral runner.
-	GenerateJITConfig(ctx context.Context, scaleSetID int64, runnerName, workFolder string) (string, error)
+	GenerateJITConfig(ctx context.Context, scaleSetID int64, runnerName, workFolder string) (*JITConfigResponse, error)
+
+	// GetRunnerByName retrieves an existing runner reference by name if registered in GitHub Actions.
+	GetRunnerByName(ctx context.Context, runnerName string) (*scaleset.RunnerReference, error)
 
 	// DeleteScaleSet removes the scale set from GitHub Actions.
 	DeleteScaleSet(ctx context.Context, scaleSetID int64) error
@@ -104,7 +114,7 @@ func (c *clientImpl) GetOrCreateScaleSet(ctx context.Context, scaleSetName, runn
 	return int64(created.ID), nil
 }
 
-func (c *clientImpl) GenerateJITConfig(ctx context.Context, scaleSetID int64, runnerName, workFolder string) (string, error) {
+func (c *clientImpl) GenerateJITConfig(ctx context.Context, scaleSetID int64, runnerName, workFolder string) (*JITConfigResponse, error) {
 	if workFolder == "" {
 		workFolder = "_work"
 	}
@@ -116,10 +126,23 @@ func (c *clientImpl) GenerateJITConfig(ctx context.Context, scaleSetID int64, ru
 
 	res, err := c.rawClient.GenerateJitRunnerConfig(ctx, setting, int(scaleSetID))
 	if err != nil {
-		return "", fmt.Errorf("failed to generate JIT config for runner %q: %w", runnerName, err)
+		return nil, fmt.Errorf("failed to generate JIT config for runner %q: %w", runnerName, err)
 	}
 
-	return res.EncodedJITConfig, nil
+	var runnerID int64
+	if res.Runner != nil {
+		runnerID = int64(res.Runner.ID)
+	}
+
+	return &JITConfigResponse{
+		RunnerID:         runnerID,
+		RunnerName:       runnerName,
+		EncodedJITConfig: res.EncodedJITConfig,
+	}, nil
+}
+
+func (c *clientImpl) GetRunnerByName(ctx context.Context, runnerName string) (*scaleset.RunnerReference, error) {
+	return c.rawClient.GetRunnerByName(ctx, runnerName)
 }
 
 func (c *clientImpl) DeleteScaleSet(ctx context.Context, scaleSetID int64) error {

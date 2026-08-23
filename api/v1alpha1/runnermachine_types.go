@@ -137,6 +137,35 @@ type RunnerMachineSpec struct {
 	// Redfish specifies Redfish BMC configuration for power management.
 	// +kubebuilder:validation:Required
 	Redfish RedfishSpec `json:"redfish"`
+
+	// Maintenance enables maintenance mode, preventing SHARC from uncordoning or powering off this machine.
+	// +optional
+	Maintenance *MachineMaintenanceSpec `json:"maintenance,omitempty"`
+}
+
+// MachineMaintenanceSpec defines maintenance mode settings.
+type MachineMaintenanceSpec struct {
+	// Enabled indicates whether the machine is in maintenance mode.
+	// +kubebuilder:default=false
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+}
+
+// MachineQuarantineStatus records quarantine state when a machine repeatedly fails health/node checks.
+type MachineQuarantineStatus struct {
+	// Reason describes why the machine was quarantined.
+	Reason string `json:"reason"`
+
+	// Since is the timestamp when the machine entered quarantine.
+	Since metav1.Time `json:"since"`
+
+	// ConsecutiveFailures is the number of consecutive readiness or operation failures.
+	// +kubebuilder:default=1
+	ConsecutiveFailures int32 `json:"consecutiveFailures"`
+
+	// HealthySince is the timestamp when the machine started observing continuous healthy Node state.
+	// +optional
+	HealthySince *metav1.Time `json:"healthySince,omitempty"`
 }
 
 // PowerOperationType represents the type of power action in progress.
@@ -182,6 +211,14 @@ type RunnerMachineStatus struct {
 	// Kubernetes reflects the state of the machine's Node object on the runner cluster.
 	// +optional
 	Kubernetes RunnerMachineKubernetesStatus `json:"kubernetes,omitempty"`
+
+	// ExternallyCordoned indicates whether the Node was cordoned by an external actor (e.g. admin kubectl cordon).
+	// +optional
+	ExternallyCordoned bool `json:"externallyCordoned"`
+
+	// Quarantine records isolation state if the machine failed node readiness or shutdown timeout.
+	// +optional
+	Quarantine *MachineQuarantineStatus `json:"quarantine,omitempty"`
 
 	// LastPowerTransitionTime is the timestamp of the last recorded power state transition.
 	// +optional

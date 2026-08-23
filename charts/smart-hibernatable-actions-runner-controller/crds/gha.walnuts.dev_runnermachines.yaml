@@ -102,6 +102,16 @@ spec:
                 description: KubernetesNodeName is the expected Node name in the runner
                   Kubernetes cluster.
                 type: string
+              maintenance:
+                description: Maintenance enables maintenance mode, preventing SHARC
+                  from uncordoning or powering off this machine.
+                properties:
+                  enabled:
+                    default: false
+                    description: Enabled indicates whether the machine is in maintenance
+                      mode.
+                    type: boolean
+                type: object
               priority:
                 default: 100
                 description: Priority specifies selection priority when scaling up
@@ -262,6 +272,10 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              externallyCordoned:
+                description: ExternallyCordoned indicates whether the Node was cordoned
+                  by an external actor (e.g. admin kubectl cordon).
+                type: boolean
               kubernetes:
                 description: Kubernetes reflects the state of the machine's Node object
                   on the runner cluster.
@@ -332,6 +346,33 @@ spec:
                 - "On"
                 - PoweringOff
                 type: string
+              quarantine:
+                description: Quarantine records isolation state if the machine failed
+                  node readiness or shutdown timeout.
+                properties:
+                  consecutiveFailures:
+                    default: 1
+                    description: ConsecutiveFailures is the number of consecutive
+                      readiness or operation failures.
+                    format: int32
+                    type: integer
+                  healthySince:
+                    description: HealthySince is the timestamp when the machine started
+                      observing continuous healthy Node state.
+                    format: date-time
+                    type: string
+                  reason:
+                    description: Reason describes why the machine was quarantined.
+                    type: string
+                  since:
+                    description: Since is the timestamp when the machine entered quarantine.
+                    format: date-time
+                    type: string
+                required:
+                - consecutiveFailures
+                - reason
+                - since
+                type: object
             type: object
         type: object
     served: true

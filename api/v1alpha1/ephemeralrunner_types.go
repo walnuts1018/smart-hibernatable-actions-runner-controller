@@ -95,6 +95,29 @@ type RemotePodStatus struct {
 	NodeName string `json:"nodeName,omitempty"`
 }
 
+// ProvisioningAttemptStatus tracks an individual JIT provisioning attempt to prevent orphan runners and handle conflicts.
+type ProvisioningAttemptStatus struct {
+	// ID is the unique attempt identifier (e.g. short hash or sequential counter).
+	// +optional
+	ID string `json:"id,omitempty"`
+
+	// RunnerName is the actual runner name registered in GitHub for this attempt.
+	// +optional
+	RunnerName string `json:"runnerName,omitempty"`
+
+	// RunnerID is the GitHub Runner ID assigned after JIT generation.
+	// +optional
+	RunnerID int64 `json:"runnerID,omitempty"`
+
+	// StartedAt is the timestamp when this provisioning attempt started.
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+
+	// JITGeneratedAt is the timestamp when JIT config was generated.
+	// +optional
+	JITGeneratedAt *metav1.Time `json:"jitGeneratedAt,omitempty"`
+}
+
 // RunnerFailureStatus records details when a runner pod or execution failed.
 type RunnerFailureStatus struct {
 	// Reason is a brief camelCase string indicating the failure reason.
@@ -116,6 +139,10 @@ type EphemeralRunnerStatus struct {
 	// +kubebuilder:default="Pending"
 	// +optional
 	Phase EphemeralRunnerPhase `json:"phase,omitempty"`
+
+	// Provisioning records details of the active or latest JIT provisioning attempt.
+	// +optional
+	Provisioning *ProvisioningAttemptStatus `json:"provisioning,omitempty"`
 
 	// GitHub holds IDs and job details from GitHub Actions.
 	// +optional

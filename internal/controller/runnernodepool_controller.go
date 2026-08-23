@@ -105,6 +105,16 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
 	}
 
+	if plan.BootstrapUnavailable {
+		if r.Recorder != nil {
+			r.Recorder.Eventf(&nodePool, corev1.EventTypeWarning, "BootstrapUnavailable", "Required bootstrap machine is quarantined or under maintenance")
+		}
+		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonBootstrapUnavailable, "Required bootstrap machine is quarantined or under maintenance")
+		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeCapacityReady, metav1.ConditionFalse, conditions.ReasonBootstrapUnavailable, "Cluster prerequisite unavailable")
+		_ = r.updateStatus(ctx, &nodePool, origNodePool)
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
+
 	nodePool.Status.DesiredNodes = int32(len(plan.SelectedMachines))
 
 	// 6. DesiredMachines計画をStatusに反映
@@ -217,11 +227,13 @@ func (r *RunnerNodePoolReconciler) collectMachineCapacities(machines []ghav1alph
 		m := &machines[i]
 		isPoweredOn := m.Status.PowerState == ghav1alpha1.PowerStateOn
 		isReady := m.Status.Kubernetes.Ready && isPoweredOn
+		isQuarantined := m.Status.Quarantine != nil
+		isMaintenance := m.Spec.Maintenance != nil && m.Spec.Maintenance.Enabled
 
-		if isPoweredOn {
+		if isPoweredOn && !isQuarantined && !isMaintenance {
 			poweredOnCount++
 		}
-		if isReady {
+		if isReady && !isQuarantined && !isMaintenance {
 			readyNodesCount++
 			readyCapacity += m.Spec.Capacity.Runners
 		}
@@ -234,6 +246,8 @@ func (r *RunnerNodePoolReconciler) collectMachineCapacities(machines []ghav1alph
 			PoweredOn:       isPoweredOn,
 			Ready:           m.Status.Kubernetes.Ready,
 			PowerManageable: true,
+			Quarantined:     isQuarantined,
+			Maintenance:     isMaintenance,
 		})
 	}
 

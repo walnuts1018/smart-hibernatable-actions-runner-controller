@@ -109,6 +109,22 @@ func (r *RunnerClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			conditions.SetCondition(&cluster.Status.Conditions, conditions.TypeAPIReachable, metav1.ConditionTrue, conditions.ReasonAPISucceeded, "Runner cluster Kubernetes API is reachable")
 			cluster.Status.APIReachable = true
 			metrics.ClusterAPIReachable.WithLabelValues(cluster.Namespace, cluster.Name).Set(1)
+
+			// Cluster Identity (kube-system UID) の検証
+			clusterUID, uidErr := r.RemoteProvider.GetClusterUID(ctx, &cluster)
+			if uidErr != nil {
+				log.Error(uidErr, "failed to get cluster identity UID from remote cluster")
+			} else if cluster.Status.ClusterUID == "" {
+				cluster.Status.ClusterUID = clusterUID
+			} else if cluster.Status.ClusterUID != clusterUID {
+				log.Error(fmt.Errorf("cluster identity mismatch"), "remote cluster UID changed (expected %s, got %s)", cluster.Status.ClusterUID, clusterUID)
+				if r.Recorder != nil {
+					r.Recorder.Eventf(&cluster, corev1.EventTypeWarning, "ClusterIdentityMismatch", "Remote cluster UID changed: expected %s, got %s", cluster.Status.ClusterUID, clusterUID)
+				}
+				conditions.SetCondition(&cluster.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonClusterIdentityMismatch, "Remote cluster identity mismatch; stopping mutation")
+				cluster.Status.APIReachable = false
+				cluster.Status.Phase = ghav1alpha1.RunnerClusterPhaseDegraded
+			}
 		}
 
 		if cluster.Status.APIReachable {

@@ -45,6 +45,13 @@ func (f *fakeRemoteProvider) GetNode(ctx context.Context, cluster *ghav1alpha1.R
 	return f.node, nil
 }
 
+func (f *fakeRemoteProvider) GetClusterUID(ctx context.Context, cluster *ghav1alpha1.RunnerCluster) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return "fake-cluster-uid", nil
+}
+
 func (f *fakeRemoteProvider) InvalidateCache(clusterKey string) {}
 
 type fakePowerControllerFactory struct {
@@ -109,6 +116,7 @@ type fakeScaleSetClient struct {
 	generateJITErr     error
 	removeRunnerErr    error
 	encodedJITConfig   string
+	existingRunnerRef  *scaleset.RunnerReference
 	createdListener    *listener.Listener
 	createListenerErr  error
 	deletedScaleSetIDs []int64
@@ -127,14 +135,23 @@ func (c *fakeScaleSetClient) GetOrCreateScaleSet(ctx context.Context, scaleSetNa
 	return c.scaleSetID, nil
 }
 
-func (c *fakeScaleSetClient) GenerateJITConfig(ctx context.Context, scaleSetID int64, runnerName, workFolder string) (string, error) {
+func (c *fakeScaleSetClient) GenerateJITConfig(ctx context.Context, scaleSetID int64, runnerName, workFolder string) (*githubscaleset.JITConfigResponse, error) {
 	if c.generateJITErr != nil {
-		return "", c.generateJITErr
+		return nil, c.generateJITErr
 	}
+	enc := "fake-encoded-jit-config"
 	if c.encodedJITConfig != "" {
-		return c.encodedJITConfig, nil
+		enc = c.encodedJITConfig
 	}
-	return "fake-encoded-jit-config", nil
+	return &githubscaleset.JITConfigResponse{
+		RunnerID:         200,
+		RunnerName:       runnerName,
+		EncodedJITConfig: enc,
+	}, nil
+}
+
+func (c *fakeScaleSetClient) GetRunnerByName(ctx context.Context, runnerName string) (*scaleset.RunnerReference, error) {
+	return c.existingRunnerRef, nil
 }
 
 func (c *fakeScaleSetClient) DeleteScaleSet(ctx context.Context, scaleSetID int64) error {

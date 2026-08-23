@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -123,6 +124,25 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 				conditions.SetCondition(&machine.Status.Conditions, conditions.TypeKubernetesNodeReady, metav1.ConditionTrue, conditions.ReasonNodeReady, "Kubernetes node is Ready")
 			} else {
 				conditions.SetCondition(&machine.Status.Conditions, conditions.TypeKubernetesNodeReady, metav1.ConditionFalse, conditions.ReasonNodeNotReady, "Kubernetes node is NotReady")
+				// 電源ON状態が継続しているのにNodeがReadyにならない場合、Quarantine判定
+				nodeReadyTimeout := 10 * time.Minute
+				if cluster.Spec.Readiness.NodeReadyTimeout != nil && cluster.Spec.Readiness.NodeReadyTimeout.Duration > 0 {
+					nodeReadyTimeout = cluster.Spec.Readiness.NodeReadyTimeout.Duration
+				}
+				if machine.Status.PowerState == ghav1alpha1.PowerStateOn && machine.Status.LastPowerTransitionTime != nil {
+					if time.Since(machine.Status.LastPowerTransitionTime.Time) > nodeReadyTimeout && machine.Status.Quarantine == nil {
+						now := metav1.Now()
+						machine.Status.Quarantine = &ghav1alpha1.MachineQuarantineStatus{
+							Reason:              "NodeReadyTimeout",
+							Since:               now,
+							ConsecutiveFailures: 1,
+						}
+						conditions.SetCondition(&machine.Status.Conditions, conditions.TypeQuarantined, metav1.ConditionTrue, conditions.ReasonQuarantined, fmt.Sprintf("Node failed to become Ready within %s", nodeReadyTimeout))
+						if r.Recorder != nil {
+							r.Recorder.Eventf(&machine, corev1.EventTypeWarning, "MachineQuarantined", "Machine %s quarantined: Node failed to become Ready within %s", machine.Name, nodeReadyTimeout)
+						}
+					}
+				}
 			}
 		}
 	} else {
@@ -165,6 +185,51 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
+type CordonOwnership int
+
+const (
+	CordonNotNeeded CordonOwnership = iota
+	CordonOwnedBySHARC
+	CordonExternal
+)
+
+func (r *RunnerMachineReconciler) ensureCordoned(
+	ctx context.Context,
+	c client.Client,
+	node *corev1.Node,
+	machineUID types.UID,
+) (CordonOwnership, error) {
+	annotations := node.GetAnnotations()
+	owner := ""
+	if annotations != nil {
+		owner = annotations[runner.AnnotationCordonedBy]
+	}
+
+	// 既にSHARCによってCordonされている場合
+	if node.Spec.Unschedulable && owner == string(machineUID) {
+		return CordonOwnedBySHARC, nil
+	}
+
+	// 外部（管理者や他ツール）によって既にCordonされている場合: 所有権は奪わない
+	if node.Spec.Unschedulable {
+		return CordonExternal, nil
+	}
+
+	// SHARCがSchedulable -> Unschedulableへ遷移させ、所有権アノテーションを付与
+	orig := node.DeepCopy()
+	node.Spec.Unschedulable = true
+	if node.Annotations == nil {
+		node.Annotations = make(map[string]string)
+	}
+	node.Annotations[runner.AnnotationCordonedBy] = string(machineUID)
+
+	if err := c.Patch(ctx, node, client.MergeFrom(orig)); err != nil {
+		return CordonNotNeeded, err
+	}
+
+	return CordonOwnedBySHARC, nil
+}
+
 func (r *RunnerMachineReconciler) reconcileActive(
 	ctx context.Context,
 	m *ghav1alpha1.RunnerMachine,
@@ -175,7 +240,24 @@ func (r *RunnerMachineReconciler) reconcileActive(
 ) time.Duration {
 	log := logf.FromContext(ctx)
 
-	// 1. もし電源OFFならPowerOnを実行
+	// メンテナンスモードの場合は電源操作を行わない
+	if m.Spec.Maintenance != nil && m.Spec.Maintenance.Enabled {
+		log.Info("machine is in maintenance mode, skipping power management", "machine", m.Name)
+		conditions.SetCondition(&m.Status.Conditions, conditions.TypeMaintenance, metav1.ConditionTrue, conditions.ReasonMaintenance, "Machine is under maintenance")
+		return 1 * time.Minute
+	}
+
+	// 1. Shutdown Commit Point以降の方向転換保護: シャットダウン処理中の場合はまずOffになるのを待つ
+	if m.Status.Operation != nil && (m.Status.Operation.Type == ghav1alpha1.PowerOperationTypeGracefulShutdown || m.Status.Operation.Type == ghav1alpha1.PowerOperationTypeForceOff) {
+		if m.Status.PowerState != ghav1alpha1.PowerStateOff {
+			log.Info("waiting for in-flight shutdown to complete before restarting machine", "machine", m.Name, "operation", m.Status.Operation.Type)
+			return 5 * time.Second
+		}
+		// OffになったらOperationをクリアしてPowerOnへ進む
+		m.Status.Operation = nil
+	}
+
+	// 2. もし電源OFFならPowerOnを実行
 	if m.Status.PowerState == ghav1alpha1.PowerStateOff {
 		if m.Status.Operation != nil && m.Status.Operation.Type == ghav1alpha1.PowerOperationTypePowerOn {
 			if time.Since(m.Status.Operation.LastAttemptAt.Time) < 30*time.Second {
@@ -214,12 +296,12 @@ func (r *RunnerMachineReconciler) reconcileActive(
 		return 10 * time.Second
 	}
 
-	// 2. 起動中なら待機
+	// 3. 起動中なら待機
 	if m.Status.PowerState == ghav1alpha1.PowerStatePoweringOn {
 		return 10 * time.Second
 	}
 
-	// 3. 電源ONかつNodeがReadyなら、自身が設定したCordonを解除
+	// 4. 電源ONかつNodeがReadyなら、自身が設定したCordonのみ解除（外部Cordonは保護）
 	if m.Status.PowerState == ghav1alpha1.PowerStateOn && remoteNode != nil && m.Status.Kubernetes.Ready {
 		if remoteNode.Spec.Unschedulable && remoteNode.Annotations != nil && remoteNode.Annotations[runner.AnnotationCordonedBy] == string(m.UID) {
 			remoteClient, err := r.RemoteProvider.GetClient(ctx, cluster)
@@ -231,6 +313,22 @@ func (r *RunnerMachineReconciler) reconcileActive(
 					log.Info("uncordoned node after machine became ready", "node", remoteNode.Name, "machine", m.Name)
 				}
 			}
+		}
+	}
+
+	// 5. Quarantine安定化判定: Nodeが2分間継続してReadyならQuarantine解除
+	if m.Status.Quarantine != nil {
+		if m.Status.Kubernetes.Ready {
+			now := metav1.Now()
+			if m.Status.Quarantine.HealthySince == nil {
+				m.Status.Quarantine.HealthySince = &now
+			} else if time.Since(m.Status.Quarantine.HealthySince.Time) >= 2*time.Minute {
+				log.Info("clearing quarantine after stabilization period", "machine", m.Name)
+				m.Status.Quarantine = nil
+				conditions.SetCondition(&m.Status.Conditions, conditions.TypeQuarantined, metav1.ConditionFalse, conditions.ReasonReady, "Machine is stable and healthy")
+			}
+		} else {
+			m.Status.Quarantine.HealthySince = nil
 		}
 	}
 
@@ -247,6 +345,13 @@ func (r *RunnerMachineReconciler) reconcileOff(
 	drainStartedAt *metav1.Time,
 ) time.Duration {
 	log := logf.FromContext(ctx)
+
+	// メンテナンスモードの場合は電源OFF操作を行わない
+	if m.Spec.Maintenance != nil && m.Spec.Maintenance.Enabled {
+		log.Info("machine is in maintenance mode, skipping power down", "machine", m.Name)
+		conditions.SetCondition(&m.Status.Conditions, conditions.TypeMaintenance, metav1.ConditionTrue, conditions.ReasonMaintenance, "Machine is under maintenance")
+		return 1 * time.Minute
+	}
 
 	// 1. 既に電源OFF
 	if m.Status.PowerState == ghav1alpha1.PowerStateOff {
@@ -292,21 +397,21 @@ func (r *RunnerMachineReconciler) reconcileOff(
 
 	// 3. 電源ONの場合: Drainingおよび安全なスケールダウン判定
 	if m.Status.PowerState == ghav1alpha1.PowerStateOn {
-		// 3.1 まずNodeをCordonして新規Podのスケジュールを阻止
+		// 3.1 NodeをCordonして新規Podのスケジュールを阻止（外部Cordonは所有権を奪わず検知）
 		if cluster.Status.APIReachable && remoteNode != nil {
 			remoteClient, clientErr := r.RemoteProvider.GetClient(ctx, cluster)
 			if clientErr == nil {
-				if !remoteNode.Spec.Unschedulable || remoteNode.Annotations[runner.AnnotationCordonedBy] != string(m.UID) {
-					origNode := remoteNode.DeepCopy()
-					remoteNode.Spec.Unschedulable = true
-					if remoteNode.Annotations == nil {
-						remoteNode.Annotations = make(map[string]string)
-					}
-					remoteNode.Annotations[runner.AnnotationCordonedBy] = string(m.UID)
-					if patchErr := remoteClient.Patch(ctx, remoteNode, client.MergeFrom(origNode)); patchErr == nil {
-						log.Info("cordoned node before machine shutdown", "node", remoteNode.Name, "machine", m.Name)
-					}
+				ownership, cordonErr := r.ensureCordoned(ctx, remoteClient, remoteNode, m.UID)
+				if cordonErr != nil {
+					log.Error(cordonErr, "failed to ensure node cordoned", "node", remoteNode.Name)
 				}
+				if ownership == CordonExternal {
+					m.Status.ExternallyCordoned = true
+					log.Info("node is cordoned by external actor, blocking scale-down power off", "node", remoteNode.Name)
+					conditions.SetCondition(&m.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonExternalCordon, "Node is cordoned externally; scale down power off is blocked")
+					return 30 * time.Second
+				}
+				m.Status.ExternallyCordoned = false
 			}
 		}
 

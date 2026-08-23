@@ -74,6 +74,10 @@ type RunnerClusterStatus struct {
 	// +optional
 	APIReachable bool `json:"apiReachable"`
 
+	// ClusterUID is the unique identifier (kube-system namespace UID) of the remote cluster for split-brain protection.
+	// +optional
+	ClusterUID string `json:"clusterUID,omitempty"`
+
 	// Conditions store the detailed status conditions of the runner cluster.
 	// +listType=map
 	// +listMapKey=type

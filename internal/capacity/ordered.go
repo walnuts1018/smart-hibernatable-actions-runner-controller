@@ -39,14 +39,22 @@ func (p *orderedCapacityPlanner) Plan(machines []MachineCapacity, requiredRunner
 	}
 
 	var (
-		selected      []*ghav1alpha1.RunnerMachine
-		totalCapacity int
-		hasBootstrap  bool
-		candidates    []MachineCapacity
+		selected             []*ghav1alpha1.RunnerMachine
+		totalCapacity        int
+		hasBootstrap         bool
+		bootstrapUnavailable bool
+		candidates           []MachineCapacity
 	)
 
 	// Phase 1: インフラ前提条件（Bootstrapマシン）を最優先で選択
 	for _, mc := range machines {
+		if mc.Quarantined || mc.Maintenance {
+			if mc.Bootstrap {
+				bootstrapUnavailable = true
+			}
+			continue
+		}
+
 		if mc.Bootstrap {
 			selected = append(selected, mc.Machine)
 			totalCapacity += mc.Capacity
@@ -56,12 +64,19 @@ func (p *orderedCapacityPlanner) Plan(machines []MachineCapacity, requiredRunner
 		}
 	}
 
+	if bootstrapUnavailable && !hasBootstrap {
+		return Plan{
+			BootstrapUnavailable: true,
+		}
+	}
+
 	// 既に前提条件のみで必要容量を満たしている場合はそのまま返す
 	if totalCapacity >= requiredRunners {
 		return Plan{
-			SelectedMachines:  selected,
-			TotalCapacity:     totalCapacity,
-			BootstrapRequired: hasBootstrap,
+			SelectedMachines:     selected,
+			TotalCapacity:        totalCapacity,
+			BootstrapRequired:    hasBootstrap,
+			BootstrapUnavailable: bootstrapUnavailable,
 		}
 	}
 

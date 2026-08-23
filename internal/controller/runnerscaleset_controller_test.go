@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -148,12 +149,13 @@ func TestRunnerScaleSetReconciler(t *testing.T) {
 	}
 }
 
-func TestRunnerScaleSetReconciler_DeletionWhenSecretMissing(t *testing.T) {
+func TestRunnerScaleSetReconciler_DeletionWithSecretMissingAndOrphanOverride(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)
 	_ = ghav1alpha1.AddToScheme(scheme)
 
 	now := metav1.Now()
+	// Case 1: Secretが欠落しており、orphan overrideがない場合 -> Finalizerは維持されて削除ブロック
 	scaleSet := &ghav1alpha1.RunnerScaleSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "test-ss",
@@ -174,7 +176,7 @@ func TestRunnerScaleSetReconciler_DeletionWhenSecretMissing(t *testing.T) {
 		},
 	}
 
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(scaleSet).Build()
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(scaleSet).WithStatusSubresource(scaleSet).Build()
 
 	r := &RunnerScaleSetReconciler{
 		Client: fakeClient,
@@ -184,19 +186,39 @@ func TestRunnerScaleSetReconciler_DeletionWhenSecretMissing(t *testing.T) {
 		},
 	}
 
-	_, err := r.Reconcile(context.Background(), ctrl.Request{
+	res, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: client.ObjectKey{Namespace: "default", Name: "test-ss"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error during deletion reconciliation: %v", err)
 	}
+	if res.RequeueAfter != 30*time.Second {
+		t.Errorf("expected 30s requeue when secret is missing, got %v", res.RequeueAfter)
+	}
 
 	var updated ghav1alpha1.RunnerScaleSet
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-ss"}, &updated); err != nil {
+		t.Fatalf("failed to get scale set: %v", err)
+	}
+	if len(updated.Finalizers) == 0 {
+		t.Errorf("expected finalizers to be retained when secret is missing without orphan override")
+	}
+
+	// Case 2: orphan-github-resource アノテーションが付与された場合 -> Finalizerが解除される
+	updated.Annotations = map[string]string{
+		runner.AnnotationOrphanGitHubResource: "true",
+	}
+	_ = fakeClient.Update(context.Background(), &updated)
+
+	_, err = r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: client.ObjectKey{Namespace: "default", Name: "test-ss"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
 	err = fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-ss"}, &updated)
-	if err == nil {
-		// If object still exists, finalizer should have been removed
-		if len(updated.Finalizers) != 0 {
-			t.Fatalf("expected finalizers to be empty, got %v", updated.Finalizers)
-		}
+	if err == nil && len(updated.Finalizers) != 0 {
+		t.Errorf("expected finalizer to be removed with orphan override, got %v", updated.Finalizers)
 	}
 }

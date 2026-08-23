@@ -112,6 +112,10 @@ spec:
                 description: APIReachable indicates whether the runner cluster's Kubernetes
                   API server responded successfully to a health check.
                 type: boolean
+              clusterUID:
+                description: ClusterUID is the unique identifier (kube-system namespace
+                  UID) of the remote cluster for split-brain protection.
+                type: string
               conditions:
                 description: Conditions store the detailed status conditions of the
                   runner cluster.

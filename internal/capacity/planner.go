@@ -13,6 +13,8 @@ type MachineCapacity struct {
 	PoweredOn       bool
 	Ready           bool
 	PowerManageable bool
+	Quarantined     bool
+	Maintenance     bool
 }
 
 // Plan represents the output of capacity planning.
@@ -25,6 +27,9 @@ type Plan struct {
 
 	// BootstrapRequired indicates whether a bootstrap machine is included in the selection.
 	BootstrapRequired bool
+
+	// BootstrapUnavailable indicates whether the required bootstrap machine is quarantined or unavailable.
+	BootstrapUnavailable bool
 
 	// MultiNodeViolated indicates if multi-node pool was encountered when MultiNode feature is disabled.
 	MultiNodeViolated bool

@@ -73,24 +73,70 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				_ = r.updateStatus(ctx, &scaleSet, origScaleSet)
 			}
 
-			// 1.2 子 EphemeralRunner の残存確認 (Drain)
+			// 1.2 子 EphemeralRunner の一覧取得
 			var runnerList ghav1alpha1.EphemeralRunnerList
 			if err := r.List(ctx, &runnerList, client.InNamespace(scaleSet.Namespace), client.MatchingLabels{
 				runner.LabelScaleSetUID: string(scaleSet.UID),
-			}); err == nil && len(runnerList.Items) > 0 {
-				log.Info("waiting for child ephemeral runners to drain before removing scale set", "count", len(runnerList.Items))
+			}); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			// 1.3 non-terminal な EphemeralRunner の残存確認 (Drain)
+			nonTerminalCount := 0
+			for i := range runnerList.Items {
+				if isRunnerNonTerminal(runnerList.Items[i].Status.Phase) {
+					nonTerminalCount++
+				}
+			}
+
+			if nonTerminalCount > 0 {
+				log.Info("waiting for non-terminal child ephemeral runners to drain before removing scale set", "nonTerminalCount", nonTerminalCount)
 				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 			}
 
-			// 1.3 GitHub Actions ScaleSet 削除
-			log.Info("deleting runner scale set from GitHub Actions", "scaleSetID", scaleSet.Status.ScaleSetID)
-			if scaleSet.Status.ScaleSetID != 0 {
-				if ghaClient, err := r.getGitHubClient(ctx, &scaleSet); err == nil {
-					if err := ghaClient.DeleteScaleSet(ctx, scaleSet.Status.ScaleSetID); err != nil {
-						log.Error(err, "failed to delete scale set in GitHub, proceeding with cleanup")
+			// 1.4 non-terminal が 0 になったら、TTL 保持中の terminal CR を即座に削除 (Cascade Cleanup)
+			for i := range runnerList.Items {
+				er := &runnerList.Items[i]
+				if !isRunnerNonTerminal(er.Status.Phase) {
+					if err := r.Delete(ctx, er); err != nil && !apierrors.IsNotFound(err) {
+						log.Error(err, "failed to delete terminal child ephemeral runner", "runner", er.Name)
+						return ctrl.Result{}, err
 					}
-				} else {
-					log.Error(err, "failed to get github client during scale set deletion, proceeding with cleanup")
+				}
+			}
+
+			if len(runnerList.Items) > 0 {
+				log.Info("waiting for child ephemeral runner CRs to be deleted", "count", len(runnerList.Items))
+				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+			}
+
+			// 1.5 Listener Deployment の停止/削除 (active session を閉じて 409 を防止)
+			var deploy appsv1.Deployment
+			deployKey := client.ObjectKey{Namespace: scaleSet.Namespace, Name: fmt.Sprintf("%s-listener", scaleSet.Name)}
+			if err := r.Get(ctx, deployKey, &deploy); err == nil {
+				if err := r.Delete(ctx, &deploy); err != nil && !apierrors.IsNotFound(err) {
+					log.Error(err, "failed to delete listener deployment before scaleset cleanup")
+					return ctrl.Result{}, err
+				}
+			}
+
+			// 1.6 GitHub Actions ScaleSet 削除
+			orphanOverride := scaleSet.Annotations != nil && scaleSet.Annotations[runner.AnnotationOrphanGitHubResource] == "true"
+			if scaleSet.Status.ScaleSetID != 0 && !orphanOverride {
+				log.Info("deleting runner scale set from GitHub Actions", "scaleSetID", scaleSet.Status.ScaleSetID)
+				ghaClient, err := r.getGitHubClient(ctx, &scaleSet)
+				if err != nil {
+					log.Error(err, "failed to get github client during scale set deletion; retention required unless orphan-github-resource override is set")
+					conditions.SetCondition(&scaleSet.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonGitHubAuthFailed, "Cannot delete GitHub ScaleSet: credentials missing")
+					_ = r.updateStatus(ctx, &scaleSet, origScaleSet)
+					return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+				}
+
+				if err := ghaClient.DeleteScaleSet(ctx, scaleSet.Status.ScaleSetID); err != nil {
+					log.Error(err, "failed to delete scale set in GitHub", "scaleSetID", scaleSet.Status.ScaleSetID)
+					conditions.SetCondition(&scaleSet.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonScaleSetFailed, fmt.Sprintf("Failed to delete scale set in GitHub: %v", err))
+					_ = r.updateStatus(ctx, &scaleSet, origScaleSet)
+					return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 				}
 			}
 

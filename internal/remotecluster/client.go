@@ -27,6 +27,9 @@ type RemoteClusterProvider interface {
 	// GetNode retrieves a Node by name from the remote cluster.
 	GetNode(ctx context.Context, cluster *ghav1alpha1.RunnerCluster, nodeName string) (*corev1.Node, error)
 
+	// GetClusterUID retrieves the unique cluster UID (kube-system namespace UID) from the remote cluster.
+	GetClusterUID(ctx context.Context, cluster *ghav1alpha1.RunnerCluster) (string, error)
+
 	// InvalidateCache drops any cached client for the given cluster.
 	InvalidateCache(clusterKey string)
 }
@@ -187,6 +190,20 @@ func (p *providerImpl) GetNode(ctx context.Context, cluster *ghav1alpha1.RunnerC
 	}
 
 	return &node, nil
+}
+
+func (p *providerImpl) GetClusterUID(ctx context.Context, cluster *ghav1alpha1.RunnerCluster) (string, error) {
+	cl, err := p.GetClient(ctx, cluster)
+	if err != nil {
+		return "", err
+	}
+
+	var ns corev1.Namespace
+	if err := cl.Get(ctx, client.ObjectKey{Name: "kube-system"}, &ns); err != nil {
+		return "", fmt.Errorf("failed to get kube-system namespace from remote cluster: %w", err)
+	}
+
+	return string(ns.UID), nil
 }
 
 func (p *providerImpl) InvalidateCache(clusterKey string) {

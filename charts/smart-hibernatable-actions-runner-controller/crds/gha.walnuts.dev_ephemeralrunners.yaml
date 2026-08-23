@@ -217,6 +217,34 @@ spec:
                 - Failed
                 - Deleting
                 type: string
+              provisioning:
+                description: Provisioning records details of the active or latest
+                  JIT provisioning attempt.
+                properties:
+                  id:
+                    description: ID is the unique attempt identifier (e.g. short hash
+                      or sequential counter).
+                    type: string
+                  jitGeneratedAt:
+                    description: JITGeneratedAt is the timestamp when JIT config was
+                      generated.
+                    format: date-time
+                    type: string
+                  runnerID:
+                    description: RunnerID is the GitHub Runner ID assigned after JIT
+                      generation.
+                    format: int64
+                    type: integer
+                  runnerName:
+                    description: RunnerName is the actual runner name registered in
+                      GitHub for this attempt.
+                    type: string
+                  startedAt:
+                    description: StartedAt is the timestamp when this provisioning
+                      attempt started.
+                    format: date-time
+                    type: string
+                type: object
               remotePod:
                 description: RemotePod holds details of the pod running on the remote
                   cluster.

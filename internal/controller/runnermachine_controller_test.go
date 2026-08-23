@@ -299,3 +299,146 @@ func TestRunnerMachineReconciler_ScaleDown_DrainingAndShutdown(t *testing.T) {
 		t.Errorf("expected GracefulShutdown to be called after runner pod finished and ScaleDownDelay elapsed")
 	}
 }
+
+func TestRunnerMachineReconciler_ExternalCordonProtection(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = ghav1alpha1.AddToScheme(scheme)
+
+	cluster := &ghav1alpha1.RunnerCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Status: ghav1alpha1.RunnerClusterStatus{
+			APIReachable: true,
+		},
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "redfish-secret", Namespace: "default"},
+		Data: map[string][]byte{
+			"username": []byte("admin"),
+			"password": []byte("password"),
+		},
+	}
+
+	machine := &ghav1alpha1.RunnerMachine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "m1",
+			Namespace: "default",
+			UID:       "machine-uid-1",
+			Labels:    map[string]string{"pool": "p1"},
+		},
+		Spec: ghav1alpha1.RunnerMachineSpec{
+			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
+			KubernetesNodeName: "node1",
+			Capacity:           ghav1alpha1.RunnerMachineCapacity{Runners: 2},
+			Bootstrap:          true,
+			Redfish: ghav1alpha1.RedfishSpec{
+				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
+			},
+		},
+		Status: ghav1alpha1.RunnerMachineStatus{
+			PowerState: ghav1alpha1.PowerStateOn,
+		},
+	}
+
+	nodePool := &ghav1alpha1.RunnerNodePool{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Spec: ghav1alpha1.RunnerNodePoolSpec{
+			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
+			MachineSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{"pool": "p1"},
+			},
+		},
+		Status: ghav1alpha1.RunnerNodePoolStatus{
+			DesiredMachines: []ghav1alpha1.MachinePlanStatus{
+				{
+					Name:         "m1",
+					UID:          "machine-uid-1",
+					DesiredState: ghav1alpha1.MachineDesiredStateOff,
+				},
+			},
+		},
+	}
+
+	// 管理者が手動でkubectl cordonしたノード (Unschedulable=true, cordoned-by annotationなし)
+	externalCordonedNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node1",
+		},
+		Spec: corev1.NodeSpec{
+			Unschedulable: true,
+		},
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{Type: corev1.NodeReady, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cluster, secret, machine, nodePool).
+		WithStatusSubresource(machine, nodePool).
+		Build()
+
+	remoteClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(externalCordonedNode).Build()
+	remoteProvider := &fakeRemoteProvider{client: remoteClient, node: externalCordonedNode}
+
+	pwrCtrl := &fakePowerController{powerState: ghav1alpha1.PowerStateOn}
+	pwrFactory := &fakePowerControllerFactory{fakeCtrl: pwrCtrl}
+
+	r := &RunnerMachineReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RemoteProvider: remoteProvider,
+		RedfishFactory: pwrFactory,
+	}
+
+	// 1. スケールダウンReconcile: 外部Cordonノードに対してSHARCが所有権を奪わず、電源OFFもブロックされること
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: client.ObjectKey{Namespace: "default", Name: "m1"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if pwrCtrl.shutdownCalled {
+		t.Errorf("expected GracefulShutdown NOT to be called on externally cordoned node")
+	}
+
+	var nodeCheck corev1.Node
+	if err := remoteClient.Get(context.Background(), client.ObjectKey{Name: "node1"}, &nodeCheck); err != nil {
+		t.Fatalf("failed to get node: %v", err)
+	}
+
+	// SHARCの所有権アノテーションが付与されていないことを検証
+	if _, exists := nodeCheck.Annotations[runner.AnnotationCordonedBy]; exists {
+		t.Errorf("expected cordoned-by annotation NOT to be added to externally cordoned node")
+	}
+
+	var machineCheck ghav1alpha1.RunnerMachine
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "m1"}, &machineCheck); err != nil {
+		t.Fatalf("failed to get machine: %v", err)
+	}
+	if !machineCheck.Status.ExternallyCordoned {
+		t.Errorf("expected ExternallyCordoned to be true")
+	}
+
+	// 2. Activeに戻った場合でも勝手にUncordonしないことを検証
+	nodePool.Status.DesiredMachines[0].DesiredState = ghav1alpha1.MachineDesiredStateActive
+	_ = fakeClient.Status().Update(context.Background(), nodePool)
+
+	_, err = r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: client.ObjectKey{Namespace: "default", Name: "m1"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if err := remoteClient.Get(context.Background(), client.ObjectKey{Name: "node1"}, &nodeCheck); err != nil {
+		t.Fatalf("failed to get node: %v", err)
+	}
+	if !nodeCheck.Spec.Unschedulable {
+		t.Errorf("expected externally cordoned node to remain Unschedulable=true")
+	}
+}

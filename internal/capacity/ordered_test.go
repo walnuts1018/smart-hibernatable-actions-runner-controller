@@ -100,6 +100,58 @@ func TestOrderedCapacityPlanner_Plan(t *testing.T) {
 			wantTotalCap:    4,
 			wantViolated:    false,
 		},
+		{
+			name:            "quarantine failover to spare machine",
+			enableMultiNode: true,
+			machines: []MachineCapacity{
+				{
+					Machine:   &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "bootstrap"}},
+					Capacity:  2,
+					Priority:  100,
+					Bootstrap: true,
+				},
+				{
+					Machine:     &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "worker1-broken"}},
+					Capacity:    2,
+					Priority:    200,
+					Bootstrap:   false,
+					Quarantined: true, // 隔離状態
+				},
+				{
+					Machine:   &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "worker2-healthy"}},
+					Capacity:  2,
+					Priority:  300,
+					Bootstrap: false,
+				},
+			},
+			requiredRunners: 3,
+			wantSelected:    []string{"bootstrap", "worker2-healthy"},
+			wantTotalCap:    4,
+			wantViolated:    false,
+		},
+		{
+			name:            "bootstrap quarantined causes bootstrap unavailable",
+			enableMultiNode: true,
+			machines: []MachineCapacity{
+				{
+					Machine:     &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "bootstrap"}},
+					Capacity:    2,
+					Priority:    100,
+					Bootstrap:   true,
+					Quarantined: true, // Bootstrapが隔離状態
+				},
+				{
+					Machine:   &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "worker1"}},
+					Capacity:  2,
+					Priority:  200,
+					Bootstrap: false,
+				},
+			},
+			requiredRunners: 2,
+			wantSelected:    []string{},
+			wantTotalCap:    0,
+			wantViolated:    false,
+		},
 	}
 
 	for _, tt := range tests {

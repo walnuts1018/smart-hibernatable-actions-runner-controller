@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/actions/scaleset"
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/runner"
 )
@@ -199,7 +200,16 @@ func TestEphemeralRunnerReconciler_Provisioning(t *testing.T) {
 		},
 	}
 
+	// 1回目のReconcile: Attemptの事前永続化
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-1"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 2回目のReconcile: JIT生成とリモートPod/Secret作成
+	_, err = r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-1"},
 	})
 	if err != nil {
@@ -215,6 +225,124 @@ func TestEphemeralRunnerReconciler_Provisioning(t *testing.T) {
 	var jitSecret corev1.Secret
 	if err := remoteClient.Get(context.Background(), client.ObjectKey{Namespace: "gha-runners", Name: "ss1-runner-1-jit"}, &jitSecret); err != nil {
 		t.Fatalf("expected remote JIT secret to be created: %v", err)
+	}
+}
+
+func TestEphemeralRunnerReconciler_OrphanRunnerRecovery(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = ghav1alpha1.AddToScheme(scheme)
+
+	cluster := &ghav1alpha1.RunnerCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Spec: ghav1alpha1.RunnerClusterSpec{
+			RunnerNamespace: "gha-runners",
+		},
+		Status: ghav1alpha1.RunnerClusterStatus{
+			Phase:        ghav1alpha1.RunnerClusterPhaseReady,
+			APIReachable: true,
+		},
+	}
+
+	nodePool := &ghav1alpha1.RunnerNodePool{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Spec: ghav1alpha1.RunnerNodePoolSpec{
+			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
+		},
+		Status: ghav1alpha1.RunnerNodePoolStatus{
+			ReadyNodes: 1,
+		},
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "github-app-secret", Namespace: "default"},
+		Data: map[string][]byte{
+			"github_app_id":              []byte("12345"),
+			"github_app_installation_id": []byte("67890"),
+			"github_app_private_key":     []byte("-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0fake\n-----END RSA PRIVATE KEY-----"),
+		},
+	}
+
+	scaleSet := &ghav1alpha1.RunnerScaleSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "ss1", Namespace: "default"},
+		Spec: ghav1alpha1.RunnerScaleSetSpec{
+			NodePoolRef: corev1.LocalObjectReference{Name: "p1"},
+			GitHub: ghav1alpha1.GitHubScaleSetSpec{
+				CredentialsSecretRef: corev1.LocalObjectReference{Name: "github-app-secret"},
+			},
+			Runner: ghav1alpha1.RunnerTemplateSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{Name: "runner", Image: "runner:latest"},
+						},
+					},
+				},
+			},
+		},
+		Status: ghav1alpha1.RunnerScaleSetStatus{
+			ScaleSetID: 100,
+		},
+	}
+
+	now := metav1.Now()
+	epRunner := &ghav1alpha1.EphemeralRunner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "ss1-runner-orphan",
+			Namespace:  "default",
+			Finalizers: []string{runner.FinalizerRunnerCleanup},
+		},
+		Spec: ghav1alpha1.EphemeralRunnerSpec{
+			ScaleSetRef: corev1.LocalObjectReference{Name: "ss1"},
+			RunnerName:  "ss1-runner-orphan",
+		},
+		Status: ghav1alpha1.EphemeralRunnerStatus{
+			Phase: ghav1alpha1.EphemeralRunnerPhaseProvisioning,
+			Provisioning: &ghav1alpha1.ProvisioningAttemptStatus{
+				ID:         "att-1",
+				RunnerName: "ss1-runner-orphan",
+				StartedAt:  &now,
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cluster, nodePool, secret, scaleSet, epRunner).
+		WithStatusSubresource(epRunner).
+		Build()
+
+	remoteClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	scaleSetClient := &fakeScaleSetClient{
+		scaleSetID: 100,
+		existingRunnerRef: &scaleset.RunnerReference{
+			ID:   777,
+			Name: "ss1-runner-orphan",
+		},
+	}
+
+	r := &EphemeralRunnerReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+		ScaleSetFactory: &fakeScaleSetFactory{
+			fakeClient: scaleSetClient,
+		},
+		RemoteProvider: &fakeRemoteProvider{
+			client: remoteClient,
+		},
+	}
+
+	// Reconcile: GitHub上の孤立Runner(ID:777)がRemoveRunnerされ、新しくJITが生成されること
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-orphan"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(scaleSetClient.removedRunnerIDs) == 0 || scaleSetClient.removedRunnerIDs[0] != 777 {
+		t.Errorf("expected existing runner ID 777 to be removed before creating new JIT config, got %v", scaleSetClient.removedRunnerIDs)
 	}
 }
 
@@ -328,7 +456,16 @@ func TestEphemeralRunnerReconciler_IdempotentProvisioningWithExistingSecret(t *t
 		},
 	}
 
+	// 1回目のReconcile: Attempt初期化
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-1"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 2回目のReconcile: 既存Secretの再利用とPod作成
+	_, err = r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: client.ObjectKey{Namespace: "default", Name: "ss1-runner-1"},
 	})
 	if err != nil {
