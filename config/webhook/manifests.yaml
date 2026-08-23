@@ -1,0 +1,192 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: mutating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /mutate-gha-walnuts-dev-v1alpha1-runnercluster
+  failurePolicy: Fail
+  name: mrunnercluster.kb.io
+  rules:
+  - apiGroups:
+    - gha.walnuts.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - runnerclusters
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /mutate-gha-walnuts-dev-v1alpha1-runnermachine
+  failurePolicy: Fail
+  name: mrunnermachine.kb.io
+  rules:
+  - apiGroups:
+    - gha.walnuts.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - runnermachines
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /mutate-gha-walnuts-dev-v1alpha1-runnernodepool
+  failurePolicy: Fail
+  name: mrunnernodepool.kb.io
+  rules:
+  - apiGroups:
+    - gha.walnuts.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - runnernodepools
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /mutate-gha-walnuts-dev-v1alpha1-runnerscaleset
+  failurePolicy: Fail
+  name: mrunnerscaleset.kb.io
+  rules:
+  - apiGroups:
+    - gha.walnuts.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - runnerscalesets
+  sideEffects: None
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-gha-walnuts-dev-v1alpha1-ephemeralrunner
+  failurePolicy: Fail
+  name: vephemeralrunner.kb.io
+  rules:
+  - apiGroups:
+    - gha.walnuts.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - ephemeralrunners
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-gha-walnuts-dev-v1alpha1-runnercluster
+  failurePolicy: Fail
+  name: vrunnercluster.kb.io
+  rules:
+  - apiGroups:
+    - gha.walnuts.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - runnerclusters
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-gha-walnuts-dev-v1alpha1-runnermachine
+  failurePolicy: Fail
+  name: vrunnermachine.kb.io
+  rules:
+  - apiGroups:
+    - gha.walnuts.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - runnermachines
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-gha-walnuts-dev-v1alpha1-runnernodepool
+  failurePolicy: Fail
+  name: vrunnernodepool.kb.io
+  rules:
+  - apiGroups:
+    - gha.walnuts.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - runnernodepools
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-gha-walnuts-dev-v1alpha1-runnerscaleset
+  failurePolicy: Fail
+  name: vrunnerscaleset.kb.io
+  rules:
+  - apiGroups:
+    - gha.walnuts.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - runnerscalesets
+  sideEffects: None

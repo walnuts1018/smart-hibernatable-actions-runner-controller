@@ -1,0 +1,29 @@
+apiVersion: gha.walnuts.dev/v1alpha1
+kind: RunnerScaleSet
+metadata:
+  name: sample-medium-amd64
+spec:
+  github:
+    configURL: https://github.com/example-org
+    scaleSetName: arc-sample-medium-amd64
+    runnerGroup: default
+    credentialsSecretRef:
+      name: github-actions-app
+  nodePoolRef:
+    name: amd64
+  scaling:
+    minRunners: 0
+    maxRunners: 2
+  runner:
+    containerName: runner
+    workDir: _work
+    template:
+      spec:
+        restartPolicy: Never
+        containers:
+          - name: runner
+            image: ghcr.io/actions/actions-runner:2.321.0
+            resources:
+              requests:
+                cpu: "4"
+                memory: 8Gi

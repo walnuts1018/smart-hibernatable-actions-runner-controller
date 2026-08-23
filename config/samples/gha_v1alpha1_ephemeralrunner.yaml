@@ -1,0 +1,9 @@
+apiVersion: gha.walnuts.dev/v1alpha1
+kind: EphemeralRunner
+metadata:
+  labels:
+    app.kubernetes.io/name: smart-hibernatable-actions-runner-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: ephemeralrunner-sample
+spec:
+  # TODO(user): Add fields here

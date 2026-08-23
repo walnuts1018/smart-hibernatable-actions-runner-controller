@@ -1,0 +1,12 @@
+apiVersion: gha.walnuts.dev/v1alpha1
+kind: RunnerCluster
+metadata:
+  name: gha-amd64
+spec:
+  kubeconfigSecretRef:
+    name: gha-amd64-kubeconfig
+    key: kubeconfig
+  runnerNamespace: gha-runners
+  readiness:
+    apiRequestTimeout: 5s
+    nodeReadyTimeout: 10m

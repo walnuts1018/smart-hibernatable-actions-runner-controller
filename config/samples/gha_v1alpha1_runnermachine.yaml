@@ -1,0 +1,27 @@
+apiVersion: gha.walnuts.dev/v1alpha1
+kind: RunnerMachine
+metadata:
+  name: gha-amd64-01
+  labels:
+    gha.walnuts.dev/pool: amd64
+spec:
+  clusterRef:
+    name: gha-amd64
+  kubernetesNodeName: gha-amd64-01
+  bootstrap: true
+  priority: 100
+  capacity:
+    runners: 2
+  redfish:
+    endpoint: https://192.168.10.50
+    systemID: "1"
+    credentialsSecretRef:
+      name: gha-amd64-01-redfish
+    tls:
+      caSecretRef:
+        name: ilo-ca
+        key: ca.crt
+      insecureSkipVerify: false
+    power:
+      shutdownTimeout: 3m
+      forceOffAfter: 0s

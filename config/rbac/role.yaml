@@ -1,0 +1,108 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - gha.walnuts.dev
+  resources:
+  - ephemeralrunners
+  - runnerclusters
+  - runnermachines
+  - runnernodepools
+  - runnerscalesets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - gha.walnuts.dev
+  resources:
+  - ephemeralrunners/finalizers
+  - runnerclusters/finalizers
+  - runnermachines/finalizers
+  - runnernodepools/finalizers
+  - runnerscalesets/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - gha.walnuts.dev
+  resources:
+  - ephemeralrunners/status
+  - runnerclusters/status
+  - runnermachines/status
+  - runnernodepools/status
+  - runnerscalesets/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  - roles
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

@@ -1,0 +1,15 @@
+apiVersion: gha.walnuts.dev/v1alpha1
+kind: RunnerNodePool
+metadata:
+  name: amd64
+spec:
+  clusterRef:
+    name: gha-amd64
+  machineSelector:
+    matchLabels:
+      gha.walnuts.dev/pool: amd64
+  scaling:
+    minNodes: 0
+    maxNodes: 1
+    scaleDownDelay: 10m
+    strategy: Ordered
