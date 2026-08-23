@@ -46,6 +46,10 @@ linters:
     - unused
     - usestdlibvars
     - usetesting
+  settings:
+    revive:
+      rules:
+        - name: comment-spacings
   exclusions:
     rules:
       - path: _test\.go$
