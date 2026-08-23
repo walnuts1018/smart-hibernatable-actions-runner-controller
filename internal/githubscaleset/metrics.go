@@ -51,7 +51,7 @@ func (m *metricsRecorderImpl) RecordStatistics(statistics *scaleset.RunnerScaleS
 			ss.Status.GitHub.LastStatisticsTime = &now
 			ss.Status.Listener.LastPollTime = &now
 			ss.Status.Listener.Ready = true
-			_ = m.client.Status().Patch(ctx, &ss, client.MergeFrom(orig))
+			m.client.Status().Patch(ctx, &ss, client.MergeFrom(orig))
 		}
 	}
 }

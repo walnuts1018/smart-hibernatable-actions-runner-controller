@@ -20,8 +20,8 @@ import (
 
 func TestRunnerScaleSetReconciler(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	secret := &corev1.Secret{
 		Name:      "github-app-secret",
@@ -143,8 +143,8 @@ func TestRunnerScaleSetReconciler(t *testing.T) {
 
 func TestRunnerScaleSetReconciler_DeletionWithSecretMissingAndOrphanOverride(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	now := metav1.Now()
 	// Case 1: Secretが欠落しており、orphan overrideがない場合 -> Finalizerは維持されて削除ブロック
@@ -198,7 +198,7 @@ func TestRunnerScaleSetReconciler_DeletionWithSecretMissingAndOrphanOverride(t *
 	updated.Annotations = map[string]string{
 		runner.AnnotationOrphanGitHubResource: "true",
 	}
-	_ = fakeClient.Update(context.Background(), &updated)
+	fakeClient.Update(context.Background(), &updated)
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
 		Namespace: "default", Name: "test-ss",

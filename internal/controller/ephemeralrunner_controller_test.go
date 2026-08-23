@@ -20,8 +20,8 @@ import (
 
 func TestEphemeralRunnerReconciler_WaitingForCluster(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name: "c1", Namespace: "default",
@@ -107,8 +107,8 @@ func TestEphemeralRunnerReconciler_WaitingForCluster(t *testing.T) {
 
 func TestEphemeralRunnerReconciler_Provisioning(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name: "c1", Namespace: "default",
@@ -226,8 +226,8 @@ func TestEphemeralRunnerReconciler_Provisioning(t *testing.T) {
 
 func TestEphemeralRunnerReconciler_OrphanRunnerRecovery(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name: "c1", Namespace: "default",
@@ -342,8 +342,8 @@ func TestEphemeralRunnerReconciler_OrphanRunnerRecovery(t *testing.T) {
 
 func TestEphemeralRunnerReconciler_IdempotentProvisioningWithExistingSecret(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name: "c1", Namespace: "default",
@@ -479,8 +479,8 @@ func TestEphemeralRunnerReconciler_IdempotentProvisioningWithExistingSecret(t *t
 
 func TestEphemeralRunnerReconciler_PodFailedSnapshotAndTTL(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name: "c1", Namespace: "default",
@@ -593,7 +593,7 @@ func TestEphemeralRunnerReconciler_PodFailedSnapshotAndTTL(t *testing.T) {
 	// 2回目のReconcile (TTL経過後): 1時間以上経過したFinishedAtを設定してReconcile (Deleteが発行される)
 	past := metav1.NewTime(time.Now().Add(-2 * time.Hour))
 	updatedRunner.Status.FinishedAt = &past
-	_ = fakeClient.Status().Update(context.Background(), &updatedRunner)
+	fakeClient.Status().Update(context.Background(), &updatedRunner)
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
 		Namespace: "default", Name: "ss1-runner-failed",
@@ -620,8 +620,8 @@ func TestEphemeralRunnerReconciler_PodFailedSnapshotAndTTL(t *testing.T) {
 
 func TestEphemeralRunnerReconciler_PodCompletedTTL(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name: "c1", Namespace: "default",
@@ -712,7 +712,7 @@ func TestEphemeralRunnerReconciler_PodCompletedTTL(t *testing.T) {
 	// 2回目のReconcile (10分経過後): Deleteが発行される
 	past := metav1.NewTime(time.Now().Add(-15 * time.Minute))
 	updatedRunner.Status.FinishedAt = &past
-	_ = fakeClient.Status().Update(context.Background(), &updatedRunner)
+	fakeClient.Status().Update(context.Background(), &updatedRunner)
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
 		Namespace: "default", Name: "ss1-runner-completed",

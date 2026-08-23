@@ -58,7 +58,7 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err := r.Get(ctx, client.ObjectKey{Namespace: nodePool.Namespace, Name: nodePool.Spec.ClusterRef.Name}, &cluster); err != nil {
 		log.Error(err, "failed to get cluster for nodepool", "cluster", nodePool.Spec.ClusterRef.Name)
 		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, fmt.Sprintf("Cluster %s not found: %v", nodePool.Spec.ClusterRef.Name, err))
-		_ = r.updateStatus(ctx, &nodePool, origNodePool)
+		r.updateStatus(ctx, &nodePool, origNodePool)
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
@@ -66,14 +66,14 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	selector, err := metav1.LabelSelectorAsSelector(&nodePool.Spec.MachineSelector)
 	if err != nil {
 		log.Error(err, "invalid machine selector")
-		_ = r.updateStatus(ctx, &nodePool, origNodePool)
+		r.updateStatus(ctx, &nodePool, origNodePool)
 		return ctrl.Result{}, err
 	}
 
 	var machineList ghav1alpha1.RunnerMachineList
 	if err := r.List(ctx, &machineList, client.InNamespace(nodePool.Namespace), client.MatchingLabelsSelector{Selector: selector}); err != nil {
 		log.Error(err, "failed to list runner machines for nodepool")
-		_ = r.updateStatus(ctx, &nodePool, origNodePool)
+		r.updateStatus(ctx, &nodePool, origNodePool)
 		return ctrl.Result{}, err
 	}
 
@@ -81,7 +81,7 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	_, totalRequiredCapacity, err := r.aggregateDemand(ctx, &nodePool)
 	if err != nil {
 		log.Error(err, "failed to aggregate demand for nodepool")
-		_ = r.updateStatus(ctx, &nodePool, origNodePool)
+		r.updateStatus(ctx, &nodePool, origNodePool)
 		return ctrl.Result{}, err
 	}
 
@@ -101,7 +101,7 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			r.Recorder.Eventf(&nodePool, corev1.EventTypeWarning, "MultiNodeUnsupported", "MultiNode capacity planning is not supported in v1")
 		}
 		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonMultiNodeUnsupported, "MultiNode is unsupported in v1")
-		_ = r.updateStatus(ctx, &nodePool, origNodePool)
+		r.updateStatus(ctx, &nodePool, origNodePool)
 		return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
 	}
 
@@ -111,7 +111,7 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonBootstrapUnavailable, "Required bootstrap machine is quarantined or under maintenance")
 		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeCapacityReady, metav1.ConditionFalse, conditions.ReasonBootstrapUnavailable, "Cluster prerequisite unavailable")
-		_ = r.updateStatus(ctx, &nodePool, origNodePool)
+		r.updateStatus(ctx, &nodePool, origNodePool)
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 

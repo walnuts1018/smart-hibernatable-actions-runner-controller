@@ -16,8 +16,8 @@ import (
 
 func TestRunnerClusterReconciler(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name:      "test-cluster",
@@ -73,8 +73,8 @@ func TestRunnerClusterReconciler(t *testing.T) {
 
 func TestRunnerClusterReconciler_ShortCircuitOffline(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name:      "test-cluster",
@@ -152,8 +152,8 @@ func TestRunnerClusterReconciler_Phases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			scheme := runtime.NewScheme()
-			_ = clientgoscheme.AddToScheme(scheme)
-			_ = ghav1alpha1.AddToScheme(scheme)
+			clientgoscheme.AddToScheme(scheme)
+			ghav1alpha1.AddToScheme(scheme)
 
 			cluster := &ghav1alpha1.RunnerCluster{
 				Name: "c1", Namespace: "default",

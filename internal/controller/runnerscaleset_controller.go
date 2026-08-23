@@ -70,7 +70,7 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			// 1.1 新規生成停止のため effectiveMaxRunners = 0 に設定
 			if scaleSet.Status.EffectiveMaxRunners != 0 {
 				scaleSet.Status.EffectiveMaxRunners = 0
-				_ = r.updateStatus(ctx, &scaleSet, origScaleSet)
+				r.updateStatus(ctx, &scaleSet, origScaleSet)
 			}
 
 			// 1.2 子 EphemeralRunner の一覧取得
@@ -128,14 +128,14 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				if err != nil {
 					log.Error(err, "failed to get github client during scale set deletion; retention required unless orphan-github-resource override is set")
 					conditions.SetCondition(&scaleSet.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonGitHubAuthFailed, "Cannot delete GitHub ScaleSet: credentials missing")
-					_ = r.updateStatus(ctx, &scaleSet, origScaleSet)
+					r.updateStatus(ctx, &scaleSet, origScaleSet)
 					return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 				}
 
 				if err := ghaClient.DeleteScaleSet(ctx, scaleSet.Status.ScaleSetID); err != nil {
 					log.Error(err, "failed to delete scale set in GitHub", "scaleSetID", scaleSet.Status.ScaleSetID)
 					conditions.SetCondition(&scaleSet.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonScaleSetFailed, fmt.Sprintf("Failed to delete scale set in GitHub: %v", err))
-					_ = r.updateStatus(ctx, &scaleSet, origScaleSet)
+					r.updateStatus(ctx, &scaleSet, origScaleSet)
 					return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 				}
 			}
@@ -160,7 +160,7 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// 2. GitHub ScaleSet の同期
 	if err := r.reconcileGitHub(ctx, &scaleSet); err != nil {
 		log.Error(err, "failed to reconcile GitHub ScaleSet")
-		_ = r.updateStatus(ctx, &scaleSet, origScaleSet)
+		r.updateStatus(ctx, &scaleSet, origScaleSet)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
@@ -168,21 +168,21 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	declaredCapacity, err := r.reconcileCapacity(ctx, &scaleSet)
 	if err != nil {
 		log.Error(err, "failed to reconcile capacity")
-		_ = r.updateStatus(ctx, &scaleSet, origScaleSet)
+		r.updateStatus(ctx, &scaleSet, origScaleSet)
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
 	// 4. Listener 関連リソースの Server-Side Apply
 	if err := r.reconcileListener(ctx, &scaleSet); err != nil {
 		log.Error(err, "failed to reconcile listener resources")
-		_ = r.updateStatus(ctx, &scaleSet, origScaleSet)
+		r.updateStatus(ctx, &scaleSet, origScaleSet)
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
 	// 5. EphemeralRunner リソースの Reconciliation
 	if err := r.reconcileRunners(ctx, &scaleSet, declaredCapacity); err != nil {
 		log.Error(err, "failed to reconcile ephemeral runners")
-		_ = r.updateStatus(ctx, &scaleSet, origScaleSet)
+		r.updateStatus(ctx, &scaleSet, origScaleSet)
 		return ctrl.Result{}, err
 	}
 

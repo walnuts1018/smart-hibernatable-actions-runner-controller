@@ -172,7 +172,7 @@ func (c *gofishController) PowerOn(ctx context.Context) error {
 		_, err := sys.Reset(schemas.OnResetType)
 		if err != nil {
 			// Observe-Act-Observe: エラーでも現在の状態を再確認
-			_ = sys.Update()
+			sys.Update()
 			if sys.PowerState == schemas.OnPowerState || sys.PowerState == schemas.PoweringOnPowerState {
 				return nil
 			}

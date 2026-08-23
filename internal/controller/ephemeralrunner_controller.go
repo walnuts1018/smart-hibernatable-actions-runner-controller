@@ -66,7 +66,7 @@ func (r *EphemeralRunnerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 						if runnerNs == "" {
 							runnerNs = "gha-runners"
 						}
-						_, _ = r.cleanupRemoteResources(ctx, &cluster, runnerNs, &epRunner)
+						r.cleanupRemoteResources(ctx, &cluster, runnerNs, &epRunner)
 					}
 				}
 			}
@@ -120,7 +120,7 @@ func (r *EphemeralRunnerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if cluster.Status.Phase != ghav1alpha1.RunnerClusterPhaseReady || !cluster.Status.APIReachable || nodePool.Status.ReadyNodes == 0 {
 			epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseWaitingForCluster
 			conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonPending, "Waiting for runner cluster and physical node readiness")
-			_ = r.updateStatus(ctx, &epRunner, origRunner)
+			r.updateStatus(ctx, &epRunner, origRunner)
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
 
@@ -139,7 +139,7 @@ func (r *EphemeralRunnerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return r.reconcileRunning(ctx, &epRunner, origRunner, &scaleSet, &cluster, runnerNs)
 
 	case ghav1alpha1.EphemeralRunnerPhaseCompleted:
-		_, _ = r.cleanupRemoteResources(ctx, &cluster, runnerNs, &epRunner)
+		r.cleanupRemoteResources(ctx, &cluster, runnerNs, &epRunner)
 		retention := 10 * time.Minute
 		if epRunner.Status.FinishedAt != nil {
 			elapsed := time.Since(epRunner.Status.FinishedAt.Time)
@@ -155,11 +155,11 @@ func (r *EphemeralRunnerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 		now := metav1.Now()
 		epRunner.Status.FinishedAt = &now
-		_ = r.updateStatus(ctx, &epRunner, origRunner)
+		r.updateStatus(ctx, &epRunner, origRunner)
 		return ctrl.Result{RequeueAfter: retention}, nil
 
 	case ghav1alpha1.EphemeralRunnerPhaseFailed:
-		_, _ = r.cleanupRemoteResources(ctx, &cluster, runnerNs, &epRunner)
+		r.cleanupRemoteResources(ctx, &cluster, runnerNs, &epRunner)
 		// Failed CRはトラブルシュート用に1時間保持したのち自動削除 (TTL GC)
 		retention := 1 * time.Hour
 		if epRunner.Status.FinishedAt != nil {
@@ -208,7 +208,7 @@ func (r *EphemeralRunnerReconciler) reconcileProvisioning(ctx context.Context, e
 	if err != nil {
 		log.Error(err, "failed to get client for remote cluster")
 		conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, err.Error())
-		_ = r.updateStatus(ctx, epRunner, origRunner)
+		r.updateStatus(ctx, epRunner, origRunner)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
@@ -226,7 +226,7 @@ func (r *EphemeralRunnerReconciler) reconcileProvisioning(ctx context.Context, e
 		if err != nil {
 			log.Error(err, "failed to get github client for JIT config generation")
 			conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonFailed, err.Error())
-			_ = r.updateStatus(ctx, epRunner, origRunner)
+			r.updateStatus(ctx, epRunner, origRunner)
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
 
@@ -234,7 +234,7 @@ func (r *EphemeralRunnerReconciler) reconcileProvisioning(ctx context.Context, e
 		existingRunner, getErr := ghaClient.GetRunnerByName(ctx, epRunner.Status.Provisioning.RunnerName)
 		if getErr == nil && existingRunner != nil {
 			log.Info("found existing orphaned runner on GitHub from previous failed attempt, cleaning up", "runnerName", epRunner.Status.Provisioning.RunnerName, "runnerID", existingRunner.ID)
-			_ = ghaClient.RemoveRunner(ctx, int64(existingRunner.ID))
+			ghaClient.RemoveRunner(ctx, int64(existingRunner.ID))
 		}
 
 		jitResp, err := ghaClient.GenerateJITConfig(ctx, scaleSet.Status.ScaleSetID, epRunner.Status.Provisioning.RunnerName, scaleSet.Spec.Runner.WorkDir)
@@ -245,7 +245,7 @@ func (r *EphemeralRunnerReconciler) reconcileProvisioning(ctx context.Context, e
 			}
 			epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseFailed
 			conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonFailed, err.Error())
-			_ = r.updateStatus(ctx, epRunner, origRunner)
+			r.updateStatus(ctx, epRunner, origRunner)
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
 
@@ -257,7 +257,7 @@ func (r *EphemeralRunnerReconciler) reconcileProvisioning(ctx context.Context, e
 		if err := remoteClient.Create(ctx, jitSecret); err != nil && !apierrors.IsAlreadyExists(err) {
 			log.Error(err, "failed to create JIT secret on remote cluster; removing runner from GitHub as compensation")
 			if jitResp.RunnerID != 0 {
-				_ = ghaClient.RemoveRunner(context.WithoutCancel(ctx), jitResp.RunnerID)
+				ghaClient.RemoveRunner(context.WithoutCancel(ctx), jitResp.RunnerID)
 			}
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
@@ -324,8 +324,8 @@ func (r *EphemeralRunnerReconciler) reconcileRunning(ctx context.Context, epRunn
 			if epRunner.Status.GitHub.CompletedObserved {
 				log.Info("remote runner pod already deleted after job completion", "runner", epRunner.Name)
 				epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseCompleted
-				_ = r.updateStatus(ctx, epRunner, origRunner)
-				_, _ = r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner)
+				r.updateStatus(ctx, epRunner, origRunner)
+				r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner)
 				return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
 			}
 
@@ -342,12 +342,12 @@ func (r *EphemeralRunnerReconciler) reconcileRunning(ctx context.Context, epRunn
 			// Job完了前にPodが消滅した場合、GitHub側RunnerをBest-effortでRemove
 			if !epRunner.Status.GitHub.CompletedObserved && epRunner.Status.Provisioning != nil && epRunner.Status.Provisioning.RunnerID != 0 {
 				if ghaClient, clientErr := r.getGitHubClient(ctx, scaleSet); clientErr == nil {
-					_ = ghaClient.RemoveRunner(context.WithoutCancel(ctx), epRunner.Status.Provisioning.RunnerID)
+					ghaClient.RemoveRunner(context.WithoutCancel(ctx), epRunner.Status.Provisioning.RunnerID)
 				}
 			}
 
-			_ = r.updateStatus(ctx, epRunner, origRunner)
-			_, _ = r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner)
+			r.updateStatus(ctx, epRunner, origRunner)
+			r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner)
 			return ctrl.Result{RequeueAfter: 1 * time.Hour}, nil
 		}
 		// 一時的な通信エラーの場合はFailedに倒さずRequeue
@@ -410,10 +410,10 @@ func (r *EphemeralRunnerReconciler) reconcileRunning(ctx context.Context, epRunn
 	// Completedの場合はリモートリソースを即時削除してCRは10分間TTL保持、Failedの場合は1時間TTL保持
 	switch epRunner.Status.Phase {
 	case ghav1alpha1.EphemeralRunnerPhaseCompleted:
-		_, _ = r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner)
+		r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner)
 		return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
 	case ghav1alpha1.EphemeralRunnerPhaseFailed:
-		_, _ = r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner)
+		r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner)
 		return ctrl.Result{RequeueAfter: 1 * time.Hour}, nil
 	}
 

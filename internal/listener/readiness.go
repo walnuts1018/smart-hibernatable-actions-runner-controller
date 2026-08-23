@@ -77,17 +77,17 @@ func StartHTTPServer(ctx context.Context, probeAddr, metricsAddr string, tracker
 	// Liveness probe:プロセスが生存していれば200OK
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
+		w.Write([]byte("ok"))
 	})
 
 	// Readiness probe:全条件が揃っている場合のみ200OK
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
 		if tracker.IsReady() {
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("ready"))
+			w.Write([]byte("ready"))
 		} else {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte("not ready"))
+			w.Write([]byte("not ready"))
 		}
 	})
 
@@ -128,9 +128,9 @@ func StartHTTPServer(ctx context.Context, probeAddr, metricsAddr string, tracker
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		_ = probeServer.Shutdown(shutdownCtx)
+		probeServer.Shutdown(shutdownCtx)
 		if metricsServer != nil {
-			_ = metricsServer.Shutdown(shutdownCtx)
+			metricsServer.Shutdown(shutdownCtx)
 		}
 	}()
 

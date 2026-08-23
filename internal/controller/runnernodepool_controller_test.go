@@ -19,8 +19,8 @@ import (
 
 func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name: "c1", Namespace: "default",
@@ -140,7 +140,7 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 
 	// 2. 需要が0になった場合（m1もm2もOffとして計画され、IdleSinceが開始される）
 	scaleSet.Status.DesiredRunners = 0
-	_ = fakeClient.Status().Update(context.Background(), scaleSet)
+	fakeClient.Status().Update(context.Background(), scaleSet)
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
 		Namespace: "default", Name: "p1",
@@ -169,8 +169,8 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 
 func TestRunnerNodePoolReconciler_MultiNodeDisabledViolation(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name: "c1", Namespace: "default",

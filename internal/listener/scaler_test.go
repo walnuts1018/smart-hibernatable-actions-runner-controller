@@ -15,8 +15,8 @@ import (
 
 func TestScalerHandler_HandleDesiredRunnerCount(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	nodePool := &ghav1alpha1.RunnerNodePool{}
 	nodePool.Name = "pool-1"
@@ -83,8 +83,8 @@ func TestScalerHandler_HandleDesiredRunnerCount(t *testing.T) {
 
 func TestScalerHandler_HandleJobStartedAndCompleted(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	epRunner := &ghav1alpha1.EphemeralRunner{}
 	epRunner.Name = "runner-1"

@@ -64,7 +64,7 @@ func (f *FakeRedfishServer) handleServiceRoot(w http.ResponseWriter, r *http.Req
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	json.NewEncoder(w).Encode(map[string]any{
 		odataIDKey: "/redfish/v1",
 		"Id":       "RootService",
 		nameKey:    "Root Service",
@@ -76,7 +76,7 @@ func (f *FakeRedfishServer) handleServiceRoot(w http.ResponseWriter, r *http.Req
 
 func (f *FakeRedfishServer) handleSystems(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	json.NewEncoder(w).Encode(map[string]any{
 		odataIDKey:            "/redfish/v1/Systems",
 		nameKey:               "Computer Systems Collection",
 		"Members@odata.count": 1,
@@ -92,7 +92,7 @@ func (f *FakeRedfishServer) handleSystem(w http.ResponseWriter, _ *http.Request)
 	f.mu.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	json.NewEncoder(w).Encode(map[string]any{
 		odataIDKey:   "/redfish/v1/Systems/1",
 		"Id":         "1",
 		nameKey:      "System-1",

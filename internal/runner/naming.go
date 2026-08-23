@@ -32,7 +32,7 @@ func GenerateRunnerName(scaleSetName string) string {
 		prefix = prefix[:48]
 	}
 	b := make([]byte, 4)
-	_, _ = rand.Read(b)
+	rand.Read(b)
 	return fmt.Sprintf("%s-%s", prefix, hex.EncodeToString(b))
 }
 

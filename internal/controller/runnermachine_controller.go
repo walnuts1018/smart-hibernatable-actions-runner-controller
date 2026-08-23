@@ -67,7 +67,7 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err := r.Get(ctx, client.ObjectKey{Namespace: machine.Namespace, Name: machine.Spec.ClusterRef.Name}, &cluster); err != nil {
 		log.Error(err, "failed to get cluster for machine", "cluster", machine.Spec.ClusterRef.Name)
 		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, fmt.Sprintf("Cluster %s not found: %v", machine.Spec.ClusterRef.Name, err))
-		_ = r.updateStatus(ctx, &machine, origMachine)
+		r.updateStatus(ctx, &machine, origMachine)
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
@@ -135,7 +135,7 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 				machine.Status.Kubernetes.MachineID = currentMID
 				machine.Status.Kubernetes.NodeUID = currentUID
 				delete(machine.Annotations, runner.AnnotationAdoptMachineID)
-				_ = r.Update(ctx, &machine)
+				r.Update(ctx, &machine)
 			}
 
 			switch {
@@ -164,7 +164,7 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 					conditions.ReasonMachineIDMismatch, "Node machine identity mismatch")
 				conditions.SetCondition(&machine.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse,
 					conditions.ReasonMachineIDMismatch, "Node identity invalid")
-				_ = r.updateStatus(ctx, &machine, origMachine)
+				r.updateStatus(ctx, &machine, origMachine)
 				return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
 
 			default:

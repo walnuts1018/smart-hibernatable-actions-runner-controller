@@ -62,7 +62,7 @@ func (f *FakeScaleSetServer) handleScaleSets(w http.ResponseWriter, r *http.Requ
 
 	if r.Method == http.MethodPost {
 		var req map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		json.NewDecoder(r.Body).Decode(&req)
 
 		id := f.NextID
 		f.NextID++
@@ -76,7 +76,7 @@ func (f *FakeScaleSetServer) handleScaleSets(w http.ResponseWriter, r *http.Requ
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(ss)
+		json.NewEncoder(w).Encode(ss)
 		return
 	}
 
@@ -86,7 +86,7 @@ func (f *FakeScaleSetServer) handleScaleSets(w http.ResponseWriter, r *http.Requ
 func (f *FakeScaleSetServer) handleScaleSetSubresources(w http.ResponseWriter, _ *http.Request) {
 	// e.g. /api/v3/actions/runner-scale-sets/100/generate-jitconfig
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	json.NewEncoder(w).Encode(map[string]any{
 		"runner": map[string]any{
 			"id":   1,
 			"name": "test-runner",
@@ -111,7 +111,7 @@ func (f *FakeScaleSetServer) handleDemand(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	json.NewEncoder(w).Encode(map[string]any{
 		"assigned": f.AssignedJobs,
 		"running":  f.RunningJobs,
 	})

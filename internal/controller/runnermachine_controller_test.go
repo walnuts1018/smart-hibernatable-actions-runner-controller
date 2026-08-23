@@ -19,8 +19,8 @@ import (
 
 func TestRunnerMachineReconciler_ScaleFromZero_PowerOnAndUncordon(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name: "c1", Namespace: "default",
@@ -145,8 +145,8 @@ func TestRunnerMachineReconciler_ScaleFromZero_PowerOnAndUncordon(t *testing.T) 
 
 func TestRunnerMachineReconciler_ScaleDown_DrainingAndShutdown(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name: "c1", Namespace: "default",
@@ -276,7 +276,7 @@ func TestRunnerMachineReconciler_ScaleDown_DrainingAndShutdown(t *testing.T) {
 	}
 
 	// 2. Runner Podが完了（削除）された場合: GracefulShutdownが実行される
-	_ = remoteClient.Delete(context.Background(), runnerPod)
+	remoteClient.Delete(context.Background(), runnerPod)
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
 		Namespace: "default", Name: "m1",
@@ -292,8 +292,8 @@ func TestRunnerMachineReconciler_ScaleDown_DrainingAndShutdown(t *testing.T) {
 
 func TestRunnerMachineReconciler_ExternalCordonProtection(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name: "c1", Namespace: "default",
@@ -412,7 +412,7 @@ func TestRunnerMachineReconciler_ExternalCordonProtection(t *testing.T) {
 
 	// 2. Activeに戻った場合でも勝手にUncordonしないことを検証
 	nodePool.Status.DesiredMachines[0].DesiredState = ghav1alpha1.MachineDesiredStateActive
-	_ = fakeClient.Status().Update(context.Background(), nodePool)
+	fakeClient.Status().Update(context.Background(), nodePool)
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
 		Namespace: "default", Name: "m1",
@@ -431,8 +431,8 @@ func TestRunnerMachineReconciler_ExternalCordonProtection(t *testing.T) {
 
 func TestRunnerMachineReconciler_MachineIDMismatchAndExplicitAdoption(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name: "c1", Namespace: "default",
@@ -546,7 +546,7 @@ func TestRunnerMachineReconciler_MachineIDMismatchAndExplicitAdoption(t *testing
 	checkMachine.Annotations = map[string]string{
 		runner.AnnotationAdoptMachineID: "different-machine-id-456",
 	}
-	_ = fakeClient.Update(context.Background(), &checkMachine)
+	fakeClient.Update(context.Background(), &checkMachine)
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
 		Namespace: "default", Name: "m1",
@@ -569,8 +569,8 @@ func TestRunnerMachineReconciler_MachineIDMismatchAndExplicitAdoption(t *testing
 
 func TestRunnerMachineReconciler_RedfishCircuitBreaker(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = ghav1alpha1.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name: "c1", Namespace: "default",
