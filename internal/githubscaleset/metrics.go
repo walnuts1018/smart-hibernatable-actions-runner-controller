@@ -7,6 +7,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/actions/scaleset"
+	"github.com/actions/scaleset/listener"
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/metrics"
 )
@@ -18,7 +19,7 @@ type metricsRecorderImpl struct {
 }
 
 // NewMetricsRecorder creates a listener.MetricsRecorder connected to Prometheus metrics and status updater.
-func NewMetricsRecorder(k8sClient client.Client, namespace, name string) *metricsRecorderImpl {
+func NewMetricsRecorder(k8sClient client.Client, namespace, name string) listener.MetricsRecorder {
 	return &metricsRecorderImpl{
 		client:    k8sClient,
 		namespace: namespace,
@@ -55,11 +56,11 @@ func (m *metricsRecorderImpl) RecordStatistics(statistics *scaleset.RunnerScaleS
 	}
 }
 
-func (m *metricsRecorderImpl) RecordJobStarted(msg *scaleset.JobStarted) {
+func (m *metricsRecorderImpl) RecordJobStarted(_ *scaleset.JobStarted) {
 	// Job started metrics if needed
 }
 
-func (m *metricsRecorderImpl) RecordJobCompleted(msg *scaleset.JobCompleted) {
+func (m *metricsRecorderImpl) RecordJobCompleted(_ *scaleset.JobCompleted) {
 	// Job completed metrics if needed
 }
 

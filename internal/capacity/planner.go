@@ -1,3 +1,4 @@
+// Package capacity provides capacity planning algorithms for runner nodes.
 package capacity
 
 import (
@@ -35,7 +36,7 @@ type Plan struct {
 	MultiNodeViolated bool
 }
 
-// CapacityPlanner calculates which machines should be powered on to satisfy demanded runner capacity.
-type CapacityPlanner interface {
+// Planner calculates which machines should be powered on to satisfy demanded runner capacity.
+type Planner interface {
 	Plan(machines []MachineCapacity, requiredRunners int) Plan
 }

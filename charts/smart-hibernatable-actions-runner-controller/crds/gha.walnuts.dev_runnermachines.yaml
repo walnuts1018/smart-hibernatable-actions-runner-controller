@@ -98,10 +98,16 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: clusterRef is immutable
+                  rule: self == oldSelf
               kubernetesNodeName:
                 description: KubernetesNodeName is the expected Node name in the runner
                   Kubernetes cluster.
                 type: string
+                x-kubernetes-validations:
+                - message: kubernetesNodeName is immutable
+                  rule: self == oldSelf
               maintenance:
                 description: Maintenance enables maintenance mode, preventing SHARC
                   from uncordoning or powering off this machine.
@@ -280,13 +286,21 @@ spec:
                 description: Kubernetes reflects the state of the machine's Node object
                   on the runner cluster.
                 properties:
+                  boundMachineID:
+                    description: BoundMachineID is the machine-id from Node.Status.NodeInfo.MachineID
+                      when SHARC initially bound this RunnerMachine.
+                    type: string
                   machineID:
-                    description: MachineID is the machine-id from Node.Status.NodeInfo.MachineID
-                      on the runner cluster.
+                    description: MachineID is preserved for backward compatibility
+                      and matches BoundMachineID.
                     type: string
                   nodeUID:
                     description: NodeUID is the UID of the Node object on the runner
                       cluster.
+                    type: string
+                  observedMachineID:
+                    description: ObservedMachineID is the current machine-id observed
+                      from Node.Status.NodeInfo.MachineID.
                     type: string
                   present:
                     description: Present indicates whether a corresponding Kubernetes
@@ -372,6 +386,39 @@ spec:
                 - consecutiveFailures
                 - reason
                 - since
+                type: object
+              redfishHealth:
+                description: RedfishHealth tracks BMC communication health, error
+                  backoff, and circuit breaker state.
+                properties:
+                  circuit:
+                    default: Closed
+                    description: Circuit is the current circuit breaker state.
+                    enum:
+                    - Closed
+                    - Open
+                    - HalfOpen
+                    type: string
+                  consecutiveFailures:
+                    description: ConsecutiveFailures is the number of consecutive
+                      Redfish communication failures.
+                    format: int32
+                    type: integer
+                  lastFailureTime:
+                    description: LastFailureTime is the timestamp of the last failed
+                      Redfish communication.
+                    format: date-time
+                    type: string
+                  lastSuccessTime:
+                    description: LastSuccessTime is the timestamp of the last successful
+                      Redfish communication.
+                    format: date-time
+                    type: string
+                  nextProbeTime:
+                    description: NextProbeTime is the timestamp when the next Redfish
+                      probe is allowed after backoff.
+                    format: date-time
+                    type: string
                 type: object
             type: object
         type: object

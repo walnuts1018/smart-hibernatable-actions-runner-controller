@@ -56,7 +56,6 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 }
 
-// nolint:gocyclo
 func main() {
 	var metricsAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
@@ -199,7 +198,7 @@ func main() {
 	if err = (&controller.RunnerClusterReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
-		Recorder:       mgr.GetEventRecorderFor("runnercluster-controller"), //nolint:staticcheck
+		Recorder:       mgr.GetEventRecorderFor("runnercluster-controller"),
 		RemoteProvider: remoteProvider,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "RunnerCluster")
@@ -209,7 +208,7 @@ func main() {
 	if err = (&controller.RunnerMachineReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
-		Recorder:       mgr.GetEventRecorderFor("runnermachine-controller"), //nolint:staticcheck
+		Recorder:       mgr.GetEventRecorderFor("runnermachine-controller"),
 		RemoteProvider: remoteProvider,
 		RedfishFactory: redfishFactory,
 	}).SetupWithManager(mgr); err != nil {
@@ -220,7 +219,7 @@ func main() {
 	if err = (&controller.RunnerNodePoolReconciler{
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
-		Recorder:        mgr.GetEventRecorderFor("runnernodepool-controller"), //nolint:staticcheck
+		Recorder:        mgr.GetEventRecorderFor("runnernodepool-controller"),
 		RemoteProvider:  remoteProvider,
 		Planner:         planner,
 		EnableMultiNode: false,
@@ -232,7 +231,7 @@ func main() {
 	if err = (&controller.RunnerScaleSetReconciler{
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
-		Recorder:        mgr.GetEventRecorderFor("runnerscaleset-controller"), //nolint:staticcheck
+		Recorder:        mgr.GetEventRecorderFor("runnerscaleset-controller"),
 		ScaleSetFactory: scaleSetFactory,
 		ListenerImage:   listenerImage,
 	}).SetupWithManager(mgr); err != nil {
@@ -243,7 +242,7 @@ func main() {
 	if err = (&controller.EphemeralRunnerReconciler{
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
-		Recorder:        mgr.GetEventRecorderFor("ephemeralrunner-controller"), //nolint:staticcheck
+		Recorder:        mgr.GetEventRecorderFor("ephemeralrunner-controller"),
 		RemoteProvider:  remoteProvider,
 		ScaleSetFactory: scaleSetFactory,
 	}).SetupWithManager(mgr); err != nil {

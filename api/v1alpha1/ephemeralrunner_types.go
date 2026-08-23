@@ -26,6 +26,7 @@ import (
 // +kubebuilder:validation:Enum=Pending;WaitingForCluster;Provisioning;Starting;Idle;Busy;Completed;Failed;Deleting
 type EphemeralRunnerPhase string
 
+// EphemeralRunner phases.
 const (
 	EphemeralRunnerPhasePending           EphemeralRunnerPhase = "Pending"
 	EphemeralRunnerPhaseWaitingForCluster EphemeralRunnerPhase = "WaitingForCluster"

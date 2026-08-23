@@ -24,15 +24,17 @@ import (
 
 // GitHubScaleSetSpec defines GitHub Actions connection and scale set target settings.
 type GitHubScaleSetSpec struct {
-	// ConfigURL is the GitHub organization or repository URL (e.g., https://github.com/example-org).
+	// ConfigURL is the GitHub URL for the repository or organization (e.g., https://github.com/my-org or https://github.com/my-org/my-repo).
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="configURL is immutable"
 	ConfigURL string `json:"configURL"`
 
-	// ScaleSetName is the name of the Runner Scale Set registered in GitHub Actions.
+	// ScaleSetName is the name of the RunnerScaleSet registered in GitHub Actions.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="scaleSetName is immutable"
 	ScaleSetName string `json:"scaleSetName"`
 
-	// RunnerGroup is the name of the runner group to join in GitHub Actions.
+	// RunnerGroup is the GitHub runner group name (default: "default").
 	// +kubebuilder:default="default"
 	// +optional
 	RunnerGroup string `json:"runnerGroup,omitempty"`
@@ -95,6 +97,7 @@ type RunnerScaleSetSpec struct {
 
 	// NodePoolRef references the RunnerNodePool providing physical machine capacity for this scale set.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodePoolRef is immutable"
 	NodePoolRef corev1.LocalObjectReference `json:"nodePoolRef"`
 
 	// Scaling defines the runner scaling bounds.

@@ -615,19 +615,13 @@ func (r *RunnerScaleSetReconciler) reconcileRunners(ctx context.Context, ss *gha
 
 	ss.Status.ActiveRunners = int32(len(activeRunners))
 
-	effectiveMax := ss.Spec.Scaling.MaxRunners
-	if declaredCapacity < effectiveMax {
-		effectiveMax = declaredCapacity
-	}
+	effectiveMax := min(declaredCapacity, ss.Spec.Scaling.MaxRunners)
 	if ss.Spec.Suspend {
 		effectiveMax = 0
 	}
 	ss.Status.EffectiveMaxRunners = effectiveMax
 
-	targetRunners := ss.Status.DesiredRunners
-	if targetRunners > effectiveMax {
-		targetRunners = effectiveMax
-	}
+	targetRunners := min(ss.Status.DesiredRunners, effectiveMax)
 	if ss.Spec.Suspend {
 		targetRunners = 0
 	}
@@ -639,7 +633,7 @@ func (r *RunnerScaleSetReconciler) reconcileRunners(ctx context.Context, ss *gha
 		if r.Recorder != nil {
 			r.Recorder.Eventf(ss, corev1.EventTypeNormal, "ScalingUp", "Scaling up %d ephemeral runner(s) (target: %d, active: %d)", diff, targetRunners, len(activeRunners))
 		}
-		for i := 0; i < int(diff); i++ {
+		for range diff {
 			runnerName := runner.GenerateRunnerName(ss.Name)
 			newRunner := &ghav1alpha1.EphemeralRunner{
 				ObjectMeta: metav1.ObjectMeta{

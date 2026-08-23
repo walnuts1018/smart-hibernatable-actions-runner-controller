@@ -1,3 +1,4 @@
+// Package capacity provides capacity planning algorithms for runner nodes.
 package capacity
 
 import (
@@ -10,8 +11,8 @@ type orderedCapacityPlanner struct {
 	enableMultiNode bool
 }
 
-// NewOrderedCapacityPlanner creates a new CapacityPlanner using the Ordered strategy.
-func NewOrderedCapacityPlanner(enableMultiNode bool) CapacityPlanner {
+// NewOrderedCapacityPlanner creates a new Planner using the Ordered strategy.
+func NewOrderedCapacityPlanner(enableMultiNode bool) Planner {
 	return &orderedCapacityPlanner{
 		enableMultiNode: enableMultiNode,
 	}

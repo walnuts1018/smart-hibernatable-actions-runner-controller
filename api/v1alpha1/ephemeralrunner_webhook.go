@@ -44,40 +44,21 @@ func (r *EphemeralRunner) SetupWebhookWithManager(mgr ctrl.Manager) error {
 var _ admission.Validator[*EphemeralRunner] = &EphemeralRunner{}
 
 // ValidateCreate implements admission.Validator so a webhook will be registered for the type
-func (r *EphemeralRunner) ValidateCreate(ctx context.Context, obj *EphemeralRunner) (admission.Warnings, error) {
+func (r *EphemeralRunner) ValidateCreate(_ context.Context, obj *EphemeralRunner) (admission.Warnings, error) {
 	ephemeralrunnerlog.Info("validate create EphemeralRunner", "name", obj.Name)
 	return nil, obj.validateEphemeralRunner()
 }
 
 // ValidateUpdate implements admission.Validator so a webhook will be registered for the type
-func (r *EphemeralRunner) ValidateUpdate(ctx context.Context, oldObj, newObj *EphemeralRunner) (admission.Warnings, error) {
+func (r *EphemeralRunner) ValidateUpdate(_ context.Context, oldObj, newObj *EphemeralRunner) (admission.Warnings, error) {
 	ephemeralrunnerlog.Info("validate update EphemeralRunner", "name", newObj.Name)
 
 	var allErrs field.ErrorList
+	validateImmutableString(&allErrs, field.NewPath("spec", "scaleSetRef", "name"), oldObj.Spec.ScaleSetRef.Name, newObj.Spec.ScaleSetRef.Name)
+	validateImmutableString(&allErrs, field.NewPath("spec", "runnerName"), oldObj.Spec.RunnerName, newObj.Spec.RunnerName)
 
-	// 不変フィールドの検証
-	if newObj.Spec.ScaleSetRef.Name != oldObj.Spec.ScaleSetRef.Name {
-		allErrs = append(allErrs, field.Forbidden(
-			field.NewPath("spec", "scaleSetRef", "name"),
-			"field is immutable once created",
-		))
-	}
-
-	if newObj.Spec.RunnerName != oldObj.Spec.RunnerName {
-		allErrs = append(allErrs, field.Forbidden(
-			field.NewPath("spec", "runnerName"),
-			"field is immutable once created",
-		))
-	}
-
-	if err := newObj.validateEphemeralRunner(); err != nil {
-		if statusErr, ok := err.(*apierrors.StatusError); ok {
-			for _, detail := range statusErr.ErrStatus.Details.Causes {
-				allErrs = append(allErrs, field.Invalid(field.NewPath(detail.Field), "", detail.Message))
-			}
-		} else {
-			return nil, err
-		}
+	if err := appendStatusErrorCauses(&allErrs, newObj.validateEphemeralRunner()); err != nil {
+		return nil, err
 	}
 
 	if len(allErrs) > 0 {
@@ -92,7 +73,7 @@ func (r *EphemeralRunner) ValidateUpdate(ctx context.Context, oldObj, newObj *Ep
 }
 
 // ValidateDelete implements admission.Validator so a webhook will be registered for the type
-func (r *EphemeralRunner) ValidateDelete(ctx context.Context, obj *EphemeralRunner) (admission.Warnings, error) {
+func (r *EphemeralRunner) ValidateDelete(_ context.Context, obj *EphemeralRunner) (admission.Warnings, error) {
 	ephemeralrunnerlog.Info("validate delete EphemeralRunner", "name", obj.Name)
 	return nil, nil
 }

@@ -19,6 +19,9 @@ const (
 
 	// IndexClusterRefNameはRunnerMachineのspec.clusterRef.nameのインデックスキーです
 	IndexClusterRefName = ".spec.clusterRef.name"
+
+	// IndexGitHubRunnerNameはEphemeralRunnerのGitHub RunnerNameのインデックスキーです
+	IndexGitHubRunnerName = ".status.provisioning.runnerName"
 )
 
 // SetupIndexesWithManagerはコントローラーマネージャーのインデクサーにリレーションフィールドを登録します
@@ -56,6 +59,23 @@ func SetupIndexesWithManager(mgr ctrl.Manager) error {
 		return []string{rm.Spec.ClusterRef.Name}
 	}); err != nil {
 		return fmt.Errorf("failed to setup index for RunnerMachine %s: %w", IndexClusterRefName, err)
+	}
+
+	// 4. EphemeralRunner -> GitHub RunnerName (for Listener reverse lookup)
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &ghav1alpha1.EphemeralRunner{}, IndexGitHubRunnerName, func(obj client.Object) []string {
+		er, ok := obj.(*ghav1alpha1.EphemeralRunner)
+		if !ok {
+			return nil
+		}
+		if er.Status.Provisioning != nil && er.Status.Provisioning.RunnerName != "" {
+			return []string{er.Status.Provisioning.RunnerName}
+		}
+		if er.Spec.RunnerName != "" {
+			return []string{er.Spec.RunnerName}
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("failed to setup index for EphemeralRunner %s: %w", IndexGitHubRunnerName, err)
 	}
 
 	return nil

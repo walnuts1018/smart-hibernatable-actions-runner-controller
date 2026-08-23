@@ -26,6 +26,7 @@ import (
 // +kubebuilder:validation:Enum=Unknown;Off;PoweringOn;On;PoweringOff
 type PowerState string
 
+// Machine power states.
 const (
 	PowerStateUnknown     PowerState = "Unknown"
 	PowerStateOff         PowerState = "Off"
@@ -105,19 +106,66 @@ type RunnerMachineKubernetesStatus struct {
 	// +optional
 	NodeUID string `json:"nodeUID,omitempty"`
 
-	// MachineID is the machine-id from Node.Status.NodeInfo.MachineID on the runner cluster.
+	// BoundMachineID is the machine-id from Node.Status.NodeInfo.MachineID when SHARC initially bound this RunnerMachine.
+	// +optional
+	BoundMachineID string `json:"boundMachineID,omitempty"`
+
+	// ObservedMachineID is the current machine-id observed from Node.Status.NodeInfo.MachineID.
+	// +optional
+	ObservedMachineID string `json:"observedMachineID,omitempty"`
+
+	// MachineID is preserved for backward compatibility and matches BoundMachineID.
 	// +optional
 	MachineID string `json:"machineID,omitempty"`
+}
+
+// RedfishCircuitState defines the circuit breaker state for BMC communication.
+// +kubebuilder:validation:Enum=Closed;Open;HalfOpen
+type RedfishCircuitState string
+
+const (
+	// RedfishCircuitClosed indicates normal BMC communication.
+	RedfishCircuitClosed RedfishCircuitState = "Closed"
+	// RedfishCircuitOpen indicates BMC communication is paused due to repeated failures.
+	RedfishCircuitOpen RedfishCircuitState = "Open"
+	// RedfishCircuitHalfOpen indicates a single probe attempt is permitted to test BMC recovery.
+	RedfishCircuitHalfOpen RedfishCircuitState = "HalfOpen"
+)
+
+// RedfishHealthStatus records circuit breaker and error backoff state for BMC communication.
+type RedfishHealthStatus struct {
+	// Circuit is the current circuit breaker state.
+	// +kubebuilder:default="Closed"
+	// +optional
+	Circuit RedfishCircuitState `json:"circuit,omitempty"`
+
+	// ConsecutiveFailures is the number of consecutive Redfish communication failures.
+	// +optional
+	ConsecutiveFailures int32 `json:"consecutiveFailures,omitempty"`
+
+	// LastSuccessTime is the timestamp of the last successful Redfish communication.
+	// +optional
+	LastSuccessTime *metav1.Time `json:"lastSuccessTime,omitempty"`
+
+	// LastFailureTime is the timestamp of the last failed Redfish communication.
+	// +optional
+	LastFailureTime *metav1.Time `json:"lastFailureTime,omitempty"`
+
+	// NextProbeTime is the timestamp when the next Redfish probe is allowed after backoff.
+	// +optional
+	NextProbeTime *metav1.Time `json:"nextProbeTime,omitempty"`
 }
 
 // RunnerMachineSpec defines the desired state of RunnerMachine.
 type RunnerMachineSpec struct {
 	// ClusterRef references the RunnerCluster this machine belongs to.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="clusterRef is immutable"
 	ClusterRef corev1.LocalObjectReference `json:"clusterRef"`
 
 	// KubernetesNodeName is the expected Node name in the runner Kubernetes cluster.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="kubernetesNodeName is immutable"
 	KubernetesNodeName string `json:"kubernetesNodeName"`
 
 	// Bootstrap indicates whether this machine is the bootstrap node required for the runner cluster Kubernetes API to be available.
@@ -207,6 +255,10 @@ type RunnerMachineStatus struct {
 	// Operation tracks an in-progress power transition to prevent redundant API calls.
 	// +optional
 	Operation *PowerOperationStatus `json:"operation,omitempty"`
+
+	// RedfishHealth tracks BMC communication health, error backoff, and circuit breaker state.
+	// +optional
+	RedfishHealth *RedfishHealthStatus `json:"redfishHealth,omitempty"`
 
 	// Kubernetes reflects the state of the machine's Node object on the runner cluster.
 	// +optional

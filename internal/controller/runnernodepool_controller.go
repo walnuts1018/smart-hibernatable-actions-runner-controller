@@ -28,8 +28,8 @@ type RunnerNodePoolReconciler struct {
 	client.Client
 	Scheme          *runtime.Scheme
 	Recorder        record.EventRecorder
-	RemoteProvider  remotecluster.RemoteClusterProvider
-	Planner         capacity.CapacityPlanner
+	RemoteProvider  remotecluster.Provider
+	Planner         capacity.Planner
 	EnableMultiNode bool
 }
 
@@ -205,10 +205,7 @@ func (r *RunnerNodePoolReconciler) aggregateDemand(ctx context.Context, nodePool
 			}
 		}
 
-		required := ss.Status.DesiredRunners
-		if nonTerminalCount > required {
-			required = nonTerminalCount
-		}
+		required := max(nonTerminalCount, ss.Status.DesiredRunners)
 		totalRequiredCapacity += required
 	}
 

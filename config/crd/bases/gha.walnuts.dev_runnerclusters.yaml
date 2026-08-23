@@ -81,6 +81,9 @@ spec:
                 - key
                 type: object
                 x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: kubeconfigSecretRef is immutable
+                  rule: self == oldSelf
               readiness:
                 description: Readiness defines timeouts and parameters for checking
                   cluster readiness.

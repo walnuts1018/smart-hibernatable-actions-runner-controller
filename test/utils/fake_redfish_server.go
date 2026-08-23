@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+const (
+	odataIDKey = "@odata.id"
+	nameKey    = "Name"
+)
+
 // FakeRedfishServer emulates a physical machine's BMC Redfish interface for E2E and unit testing.
 type FakeRedfishServer struct {
 	mu            sync.RWMutex
@@ -59,41 +64,41 @@ func (f *FakeRedfishServer) handleServiceRoot(w http.ResponseWriter, r *http.Req
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"@odata.id": "/redfish/v1",
-		"Id":        "RootService",
-		"Name":      "Root Service",
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		odataIDKey: "/redfish/v1",
+		"Id":       "RootService",
+		nameKey:    "Root Service",
 		"Systems": map[string]string{
-			"@odata.id": "/redfish/v1/Systems",
+			odataIDKey: "/redfish/v1/Systems",
 		},
 	})
 }
 
-func (f *FakeRedfishServer) handleSystems(w http.ResponseWriter, r *http.Request) {
+func (f *FakeRedfishServer) handleSystems(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"@odata.id":           "/redfish/v1/Systems",
-		"Name":                "Computer Systems Collection",
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		odataIDKey:            "/redfish/v1/Systems",
+		nameKey:               "Computer Systems Collection",
 		"Members@odata.count": 1,
 		"Members": []map[string]string{
-			{"@odata.id": "/redfish/v1/Systems/1"},
+			{odataIDKey: "/redfish/v1/Systems/1"},
 		},
 	})
 }
 
-func (f *FakeRedfishServer) handleSystem(w http.ResponseWriter, r *http.Request) {
+func (f *FakeRedfishServer) handleSystem(w http.ResponseWriter, _ *http.Request) {
 	f.mu.RLock()
 	state := f.PowerState
 	f.mu.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"@odata.id":  "/redfish/v1/Systems/1",
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		odataIDKey:   "/redfish/v1/Systems/1",
 		"Id":         "1",
-		"Name":       "System-1",
+		nameKey:      "System-1",
 		"PowerState": state,
-		"Actions": map[string]interface{}{
-			"#ComputerSystem.Reset": map[string]interface{}{
+		"Actions": map[string]any{
+			"#ComputerSystem.Reset": map[string]any{
 				"target": "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
 				"ResetType@Redfish.AllowableValues": []string{
 					"On",

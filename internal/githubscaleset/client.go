@@ -161,7 +161,7 @@ func (c *clientImpl) RemoveRunner(ctx context.Context, runnerID int64) error {
 	return nil
 }
 
-func (c *clientImpl) CreateListener(ctx context.Context, scaleSetID int64, maxCapacity int, scaler listener.Scaler, recorder listener.MetricsRecorder) (*listener.Listener, error) {
+func (c *clientImpl) CreateListener(ctx context.Context, scaleSetID int64, maxCapacity int, _ listener.Scaler, recorder listener.MetricsRecorder) (*listener.Listener, error) {
 	opts := []listener.Option{}
 	if recorder != nil {
 		opts = append(opts, listener.WithMetricsRecorder(recorder))

@@ -29,7 +29,7 @@ type EphemeralRunnerReconciler struct {
 	client.Client
 	Scheme          *runtime.Scheme
 	Recorder        record.EventRecorder
-	RemoteProvider  remotecluster.RemoteClusterProvider
+	RemoteProvider  remotecluster.Provider
 	ScaleSetFactory githubscaleset.ScaleSetClientFactory
 }
 

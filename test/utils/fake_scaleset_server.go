@@ -11,7 +11,7 @@ import (
 type FakeScaleSetServer struct {
 	mu           sync.RWMutex
 	Server       *httptest.Server
-	ScaleSets    map[int64]map[string]interface{}
+	ScaleSets    map[int64]map[string]any
 	NextID       int64
 	AssignedJobs int
 	RunningJobs  int
@@ -20,7 +20,7 @@ type FakeScaleSetServer struct {
 // NewFakeScaleSetServer creates and starts a new FakeScaleSetServer.
 func NewFakeScaleSetServer() *FakeScaleSetServer {
 	f := &FakeScaleSetServer{
-		ScaleSets: make(map[int64]map[string]interface{}),
+		ScaleSets: make(map[int64]map[string]any),
 		NextID:    100,
 	}
 
@@ -61,13 +61,13 @@ func (f *FakeScaleSetServer) handleScaleSets(w http.ResponseWriter, r *http.Requ
 	defer f.mu.Unlock()
 
 	if r.Method == http.MethodPost {
-		var req map[string]interface{}
+		var req map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&req)
 
 		id := f.NextID
 		f.NextID++
 
-		ss := map[string]interface{}{
+		ss := map[string]any{
 			"id":           id,
 			"name":         req["name"],
 			"runner_group": req["runner_group_name"],
@@ -83,11 +83,11 @@ func (f *FakeScaleSetServer) handleScaleSets(w http.ResponseWriter, r *http.Requ
 	http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 }
 
-func (f *FakeScaleSetServer) handleScaleSetSubresources(w http.ResponseWriter, r *http.Request) {
+func (f *FakeScaleSetServer) handleScaleSetSubresources(w http.ResponseWriter, _ *http.Request) {
 	// e.g. /api/v3/actions/runner-scale-sets/100/generate-jitconfig
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"runner": map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"runner": map[string]any{
 			"id":   1,
 			"name": "test-runner",
 		},
@@ -111,7 +111,7 @@ func (f *FakeScaleSetServer) handleDemand(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"assigned": f.AssignedJobs,
 		"running":  f.RunningJobs,
 	})

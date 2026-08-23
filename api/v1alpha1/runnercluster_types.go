@@ -26,6 +26,7 @@ import (
 // +kubebuilder:validation:Enum=Offline;Starting;Ready;Degraded;Unknown
 type RunnerClusterPhase string
 
+// RunnerCluster phases.
 const (
 	RunnerClusterPhaseOffline  RunnerClusterPhase = "Offline"
 	RunnerClusterPhaseStarting RunnerClusterPhase = "Starting"
@@ -51,6 +52,7 @@ type RunnerClusterReadinessSpec struct {
 type RunnerClusterSpec struct {
 	// KubeconfigSecretRef references the Secret containing the kubeconfig to connect to the runner Kubernetes cluster.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="kubeconfigSecretRef is immutable"
 	KubeconfigSecretRef corev1.SecretKeySelector `json:"kubeconfigSecretRef"`
 
 	// RunnerNamespace is the namespace on the runner cluster where runner Pods and Secrets are created.

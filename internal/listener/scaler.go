@@ -17,7 +17,7 @@ import (
 
 var scalerLogger = ctrl.Log.WithName("listener-scaler")
 
-// ScalerHandlerはGitHub Actions ScaleSetのScalerインターフェースを実装します。
+// ScalerHandler implements the GitHub Actions ScaleSet Scaler interface.
 type ScalerHandler struct {
 	client    client.Client
 	namespace string
@@ -25,7 +25,7 @@ type ScalerHandler struct {
 	tracker   *ReadinessTracker
 }
 
-// NewScalerHandlerは新しいScalerHandlerを作成します。
+// NewScalerHandler creates a new ScalerHandler.
 func NewScalerHandler(k8sClient client.Client, namespace, name string, tracker *ReadinessTracker) *ScalerHandler {
 	return &ScalerHandler{
 		client:    k8sClient,
@@ -35,7 +35,7 @@ func NewScalerHandler(k8sClient client.Client, namespace, name string, tracker *
 	}
 }
 
-// HandleDesiredRunnerCountはGitHub Actionsから受信した要求Runner数を処理し、RunnerScaleSetのStatusを更新します。
+// HandleDesiredRunnerCount handles the desired runner count received from GitHub Actions and updates RunnerScaleSet status.
 func (s *ScalerHandler) HandleDesiredRunnerCount(ctx context.Context, count int) (int, error) {
 	scalerLogger.Info("received desired runner count from GitHub", "count", count)
 
@@ -48,19 +48,13 @@ func (s *ScalerHandler) HandleDesiredRunnerCount(ctx context.Context, count int)
 
 		orig := ss.DeepCopy()
 
-		declaredCap := s.calculateNodePoolDeclaredCapacity(ctx, &ss)
-		effectiveMax := ss.Spec.Scaling.MaxRunners
-		if declaredCap < effectiveMax {
-			effectiveMax = declaredCap
-		}
+		// Managerが計算したEffectiveMaxRunnersを唯一のsource of truthとして使用
+		effectiveMax := ss.Status.EffectiveMaxRunners
 		if ss.Spec.Suspend {
 			effectiveMax = 0
 		}
 
-		targetRunners := ss.Spec.Scaling.MinRunners + int32(count)
-		if targetRunners > effectiveMax {
-			targetRunners = effectiveMax
-		}
+		targetRunners := min(ss.Spec.Scaling.MinRunners+int32(count), effectiveMax)
 		if ss.Spec.Suspend {
 			targetRunners = 0
 		}
@@ -89,7 +83,7 @@ func (s *ScalerHandler) HandleDesiredRunnerCount(ctx context.Context, count int)
 	return int(calculatedTarget), nil
 }
 
-// HandleJobStartedはRunnerでJobが開始された際の通知を処理します。
+// HandleJobStarted handles the notification when a job starts on a runner.
 func (s *ScalerHandler) HandleJobStarted(ctx context.Context, jobInfo *scaleset.JobStarted) error {
 	if jobInfo == nil || jobInfo.RunnerName == "" {
 		return nil
@@ -123,7 +117,7 @@ func (s *ScalerHandler) HandleJobStarted(ctx context.Context, jobInfo *scaleset.
 	})
 }
 
-// HandleJobCompletedはRunnerでJobが完了した際の通知を処理します。
+// HandleJobCompleted handles the notification when a job finishes on a runner.
 func (s *ScalerHandler) HandleJobCompleted(ctx context.Context, jobInfo *scaleset.JobCompleted) error {
 	if jobInfo == nil || jobInfo.RunnerName == "" {
 		return nil
@@ -145,28 +139,4 @@ func (s *ScalerHandler) HandleJobCompleted(ctx context.Context, jobInfo *scalese
 		patch := client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{})
 		return s.client.Status().Patch(ctx, &epRunner, patch)
 	})
-}
-
-func (s *ScalerHandler) calculateNodePoolDeclaredCapacity(ctx context.Context, ss *ghav1alpha1.RunnerScaleSet) int32 {
-	var nodePool ghav1alpha1.RunnerNodePool
-	if err := s.client.Get(ctx, client.ObjectKey{Namespace: ss.Namespace, Name: ss.Spec.NodePoolRef.Name}, &nodePool); err != nil {
-		return 0
-	}
-
-	selector, err := metav1.LabelSelectorAsSelector(&nodePool.Spec.MachineSelector)
-	if err != nil {
-		return 0
-	}
-
-	var machineList ghav1alpha1.RunnerMachineList
-	matchingLabels := client.MatchingLabelsSelector{Selector: selector}
-	if err := s.client.List(ctx, &machineList, client.InNamespace(nodePool.Namespace), matchingLabels); err != nil {
-		return 0
-	}
-
-	var total int32
-	for _, m := range machineList.Items {
-		total += m.Spec.Capacity.Runners
-	}
-	return total
 }

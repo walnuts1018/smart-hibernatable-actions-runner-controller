@@ -6,6 +6,7 @@ import (
 	"fmt"
 )
 
+// Well-known labels, annotations, and finalizers for runner resources.
 const (
 	LabelManagedBy                 = "app.kubernetes.io/managed-by"
 	LabelManagedByValue            = "gha-baremetal-operator"
@@ -17,8 +18,11 @@ const (
 	AnnotationCredentialsHash      = "gha.walnuts.dev/credentials-hash"
 	AnnotationExpiresAt            = "gha.walnuts.dev/expires-at"
 	AnnotationOrphanGitHubResource = "gha.walnuts.dev/orphan-github-resource"
+	AnnotationAdoptMachineID       = "gha.walnuts.dev/adopt-machine-id"
 	FinalizerRunnerCleanup         = "gha.walnuts.dev/remote-runner-cleanup"
 	FinalizerScaleSetCleanup       = "gha.walnuts.dev/runner-scale-set"
+	IndexGitHubRunnerName          = "gha.walnuts.dev/github-runner-name"
+	DefaultContainerName           = "runner"
 )
 
 // GenerateRunnerName creates a unique runner name from the scale set name.

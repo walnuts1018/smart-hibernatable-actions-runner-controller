@@ -74,9 +74,12 @@ spec:
                   set target settings.
                 properties:
                   configURL:
-                    description: ConfigURL is the GitHub organization or repository
-                      URL (e.g., https://github.com/example-org).
+                    description: ConfigURL is the GitHub URL for the repository or
+                      organization (e.g., https://github.com/my-org or https://github.com/my-org/my-repo).
                     type: string
+                    x-kubernetes-validations:
+                    - message: configURL is immutable
+                      rule: self == oldSelf
                   credentialsSecretRef:
                     description: CredentialsSecretRef references the Secret containing
                       GitHub App credentials (github_app_id, github_app_installation_id,
@@ -95,13 +98,16 @@ spec:
                     x-kubernetes-map-type: atomic
                   runnerGroup:
                     default: default
-                    description: RunnerGroup is the name of the runner group to join
-                      in GitHub Actions.
+                    description: 'RunnerGroup is the GitHub runner group name (default:
+                      "default").'
                     type: string
                   scaleSetName:
-                    description: ScaleSetName is the name of the Runner Scale Set
-                      registered in GitHub Actions.
+                    description: ScaleSetName is the name of the RunnerScaleSet registered
+                      in GitHub Actions.
                     type: string
+                    x-kubernetes-validations:
+                    - message: scaleSetName is immutable
+                      rule: self == oldSelf
                 required:
                 - configURL
                 - credentialsSecretRef
@@ -187,6 +193,9 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: nodePoolRef is immutable
+                  rule: self == oldSelf
               runner:
                 description: Runner defines the runner pod template and container
                   settings.

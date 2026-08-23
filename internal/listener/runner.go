@@ -42,7 +42,7 @@ func calculateBackoff(attempt int, base time.Duration, maxDelay time.Duration) t
 	return time.Duration(n.Int64())
 }
 
-// RunnerOptionsはListenerプロセスの実行オプションを保持します。
+// RunnerOptions holds execution options for the listener process.
 type RunnerOptions struct {
 	Namespace       string
 	Name            string
@@ -54,7 +54,7 @@ type RunnerOptions struct {
 	ScaleSetFactory githubscaleset.ScaleSetClientFactory
 }
 
-// RunListenerWithLeaseはLeaseによる排他制御を行い、LeaderになったらListenerセッションを開始します。
+// RunListenerWithLease performs leader election using Lease and starts the listener session.
 func RunListenerWithLease(ctx context.Context, opts RunnerOptions) error {
 	tracker := NewReadinessTracker()
 
@@ -188,16 +188,7 @@ func runListenerSession(ctx context.Context, opts RunnerOptions, tracker *Readin
 
 		scaler := NewScalerHandler(opts.K8sClient, opts.Namespace, opts.Name, tracker)
 		recorder := githubscaleset.NewMetricsRecorder(opts.K8sClient, opts.Namespace, opts.Name)
-
-		maxCapacity := int(scaleSet.Spec.Scaling.MaxRunners)
-		if scaleSet.Status.EffectiveMaxRunners > 0 || scaleSet.Spec.Suspend {
-			maxCapacity = int(scaleSet.Status.EffectiveMaxRunners)
-		} else {
-			declaredCap := scaler.calculateNodePoolDeclaredCapacity(ctx, &scaleSet)
-			if int(declaredCap) < maxCapacity {
-				maxCapacity = int(declaredCap)
-			}
-		}
+		maxCapacity := int(scaleSet.Status.EffectiveMaxRunners)
 		if scaleSet.Spec.Suspend {
 			maxCapacity = 0
 		}

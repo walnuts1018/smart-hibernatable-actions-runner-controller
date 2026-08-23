@@ -26,7 +26,7 @@ type RunnerClusterReconciler struct {
 	client.Client
 	Scheme         *runtime.Scheme
 	Recorder       record.EventRecorder
-	RemoteProvider remotecluster.RemoteClusterProvider
+	RemoteProvider remotecluster.Provider
 }
 
 // +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnerclusters,verbs=get;list;watch;create;update;patch;delete

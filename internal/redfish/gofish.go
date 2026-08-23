@@ -84,7 +84,7 @@ func (c *gofishController) getClientConfig() gofish.ClientConfig {
 	return cfg
 }
 
-func (c *gofishController) withSystem(ctx context.Context, fn func(sys *schemas.ComputerSystem) error) error {
+func (c *gofishController) withSystem(_ context.Context, fn func(sys *schemas.ComputerSystem) error) error {
 	cfg := c.getClientConfig()
 	client, err := gofish.Connect(cfg)
 	if err != nil {
@@ -149,6 +149,8 @@ func (c *gofishController) GetPowerState(ctx context.Context) (ghav1alpha1.Power
 			state = ghav1alpha1.PowerStatePoweringOn
 		case schemas.PoweringOffPowerState:
 			state = ghav1alpha1.PowerStatePoweringOff
+		case schemas.PausedPowerState:
+			state = ghav1alpha1.PowerStateUnknown
 		default:
 			state = ghav1alpha1.PowerStateUnknown
 		}
@@ -241,7 +243,7 @@ func (c *gofishController) ForceOff(ctx context.Context) error {
 	return err
 }
 
-func (c *gofishController) ValidateSupport(ctx context.Context) error {
+func (c *gofishController) ValidateSupport(_ context.Context) error {
 	cfg := c.getClientConfig()
 	client, err := gofish.Connect(cfg)
 	if err != nil {

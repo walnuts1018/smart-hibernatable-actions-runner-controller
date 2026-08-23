@@ -46,7 +46,7 @@ func (r *RunnerMachine) SetupWebhookWithManager(mgr ctrl.Manager) error {
 var _ admission.Defaulter[*RunnerMachine] = &RunnerMachine{}
 
 // Default implements admission.Defaulter so a webhook will be registered for the type
-func (r *RunnerMachine) Default(ctx context.Context, obj *RunnerMachine) error {
+func (r *RunnerMachine) Default(_ context.Context, obj *RunnerMachine) error {
 	runnermachinelog.Info("defaulting RunnerMachine", "name", obj.Name)
 
 	if obj.Spec.Priority == 0 {
@@ -69,40 +69,21 @@ func (r *RunnerMachine) Default(ctx context.Context, obj *RunnerMachine) error {
 var _ admission.Validator[*RunnerMachine] = &RunnerMachine{}
 
 // ValidateCreate implements admission.Validator so a webhook will be registered for the type
-func (r *RunnerMachine) ValidateCreate(ctx context.Context, obj *RunnerMachine) (admission.Warnings, error) {
+func (r *RunnerMachine) ValidateCreate(_ context.Context, obj *RunnerMachine) (admission.Warnings, error) {
 	runnermachinelog.Info("validate create RunnerMachine", "name", obj.Name)
 	return nil, obj.validateRunnerMachine()
 }
 
 // ValidateUpdate implements admission.Validator so a webhook will be registered for the type
-func (r *RunnerMachine) ValidateUpdate(ctx context.Context, oldObj, newObj *RunnerMachine) (admission.Warnings, error) {
+func (r *RunnerMachine) ValidateUpdate(_ context.Context, oldObj, newObj *RunnerMachine) (admission.Warnings, error) {
 	runnermachinelog.Info("validate update RunnerMachine", "name", newObj.Name)
 
 	var allErrs field.ErrorList
+	validateImmutableString(&allErrs, field.NewPath("spec", "clusterRef", "name"), oldObj.Spec.ClusterRef.Name, newObj.Spec.ClusterRef.Name)
+	validateImmutableString(&allErrs, field.NewPath("spec", "kubernetesNodeName"), oldObj.Spec.KubernetesNodeName, newObj.Spec.KubernetesNodeName)
 
-	// 不変フィールドの検証
-	if newObj.Spec.ClusterRef.Name != oldObj.Spec.ClusterRef.Name {
-		allErrs = append(allErrs, field.Forbidden(
-			field.NewPath("spec", "clusterRef", "name"),
-			"field is immutable once created",
-		))
-	}
-
-	if newObj.Spec.KubernetesNodeName != oldObj.Spec.KubernetesNodeName {
-		allErrs = append(allErrs, field.Forbidden(
-			field.NewPath("spec", "kubernetesNodeName"),
-			"field is immutable once created",
-		))
-	}
-
-	if err := newObj.validateRunnerMachine(); err != nil {
-		if statusErr, ok := err.(*apierrors.StatusError); ok {
-			for _, detail := range statusErr.ErrStatus.Details.Causes {
-				allErrs = append(allErrs, field.Invalid(field.NewPath(detail.Field), "", detail.Message))
-			}
-		} else {
-			return nil, err
-		}
+	if err := appendStatusErrorCauses(&allErrs, newObj.validateRunnerMachine()); err != nil {
+		return nil, err
 	}
 
 	if len(allErrs) > 0 {
@@ -117,7 +98,7 @@ func (r *RunnerMachine) ValidateUpdate(ctx context.Context, oldObj, newObj *Runn
 }
 
 // ValidateDelete implements admission.Validator so a webhook will be registered for the type
-func (r *RunnerMachine) ValidateDelete(ctx context.Context, obj *RunnerMachine) (admission.Warnings, error) {
+func (r *RunnerMachine) ValidateDelete(_ context.Context, obj *RunnerMachine) (admission.Warnings, error) {
 	runnermachinelog.Info("validate delete RunnerMachine", "name", obj.Name)
 	return nil, nil
 }

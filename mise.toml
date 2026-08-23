@@ -40,13 +40,9 @@ run = 'KUBEBUILDER_ASSETS="$(setup-envtest use -p path)" go test $(go list ./...
 description = "Run linter"
 run = "golangci-lint run ./..."
 
-[tasks.lint-fix]
+[tasks.lint:fix]
 description = "Run linter and perform fixes"
 run = "golangci-lint run --fix ./..."
-
-[tasks.lint-config]
-description = "Verify linter configuration"
-run = "golangci-lint config verify"
 
 [tasks.setup-test-e2e]
 description = "Set up a Kind cluster for e2e tests if it does not exist"

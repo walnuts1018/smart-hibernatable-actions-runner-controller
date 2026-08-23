@@ -29,7 +29,7 @@ type RunnerMachineReconciler struct {
 	client.Client
 	Scheme         *runtime.Scheme
 	Recorder       record.EventRecorder
-	RemoteProvider remotecluster.RemoteClusterProvider
+	RemoteProvider remotecluster.Provider
 	RedfishFactory redfish.PowerControllerFactory
 }
 
@@ -51,6 +51,17 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	origMachine := machine.DeepCopy()
 
+	// 0. Redfish Circuit Breaker 判定 (BMC無応答時のBackoff)
+	var skipRedfish bool
+	if machine.Status.RedfishHealth != nil && machine.Status.RedfishHealth.Circuit == ghav1alpha1.RedfishCircuitOpen {
+		if machine.Status.RedfishHealth.NextProbeTime != nil && time.Now().Before(machine.Status.RedfishHealth.NextProbeTime.Time) {
+			skipRedfish = true
+		} else {
+			// Probe許可 (HalfOpen)
+			machine.Status.RedfishHealth.Circuit = ghav1alpha1.RedfishCircuitHalfOpen
+		}
+	}
+
 	// 1. 所属するRunnerClusterを取得
 	var cluster ghav1alpha1.RunnerCluster
 	if err := r.Get(ctx, client.ObjectKey{Namespace: machine.Namespace, Name: machine.Spec.ClusterRef.Name}, &cluster); err != nil {
@@ -68,29 +79,35 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// 3. Redfish BMCから最新の電源状態を観測
-	pwrCtrl, err := r.getRedfishController(ctx, &machine)
-	if err != nil {
-		log.Error(err, "failed to create redfish controller")
-		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeRedfishReachable, metav1.ConditionFalse, conditions.ReasonSecretNotFound, err.Error())
+	var pwrCtrl redfish.PowerController
+	if skipRedfish {
+		log.Info("skipping Redfish power state poll due to active circuit breaker backoff", "machine", machine.Name, "nextProbeTime", machine.Status.RedfishHealth.NextProbeTime)
 	} else {
-		state, err := pwrCtrl.GetPowerState(ctx)
+		ctrl, err := r.getRedfishController(ctx, &machine)
 		if err != nil {
-			log.Error(err, "failed to get power state from redfish")
-			conditions.SetCondition(&machine.Status.Conditions, conditions.TypeRedfishReachable, metav1.ConditionFalse, conditions.ReasonUnsupportedRedfish, err.Error())
+			log.Error(err, "failed to create redfish controller")
+			r.recordRedfishFailure(&machine, time.Now(), err)
 		} else {
-			conditions.SetCondition(&machine.Status.Conditions, conditions.TypeRedfishReachable, metav1.ConditionTrue, conditions.ReasonSuccess, "Redfish is reachable")
-			if machine.Status.PowerState != state {
-				now := metav1.Now()
-				machine.Status.LastPowerTransitionTime = &now
-				machine.Status.PowerState = state
-			}
+			pwrCtrl = ctrl
+			state, err := pwrCtrl.GetPowerState(ctx)
+			if err != nil {
+				log.Error(err, "failed to get power state from redfish")
+				r.recordRedfishFailure(&machine, time.Now(), err)
+			} else {
+				r.recordRedfishSuccess(&machine, time.Now())
+				if machine.Status.PowerState != state {
+					now := metav1.Now()
+					machine.Status.LastPowerTransitionTime = &now
+					machine.Status.PowerState = state
+				}
 
-			// 電源状態が目標と一致したらOperationをクリア
-			if machine.Status.Operation != nil {
-				if machine.Status.PowerState == ghav1alpha1.PowerStateOn && machine.Status.Operation.Type == ghav1alpha1.PowerOperationTypePowerOn {
-					machine.Status.Operation = nil
-				} else if machine.Status.PowerState == ghav1alpha1.PowerStateOff && (machine.Status.Operation.Type == ghav1alpha1.PowerOperationTypeGracefulShutdown || machine.Status.Operation.Type == ghav1alpha1.PowerOperationTypeForceOff) {
-					machine.Status.Operation = nil
+				// 電源状態が目標と一致したらOperationをクリア
+				if machine.Status.Operation != nil {
+					if machine.Status.PowerState == ghav1alpha1.PowerStateOn && machine.Status.Operation.Type == ghav1alpha1.PowerOperationTypePowerOn {
+						machine.Status.Operation = nil
+					} else if machine.Status.PowerState == ghav1alpha1.PowerStateOff && (machine.Status.Operation.Type == ghav1alpha1.PowerOperationTypeGracefulShutdown || machine.Status.Operation.Type == ghav1alpha1.PowerOperationTypeForceOff) {
+						machine.Status.Operation = nil
+					}
 				}
 			}
 		}
@@ -107,19 +124,57 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		} else {
 			remoteNode = node
 			machine.Status.Kubernetes.Present = true
-			machine.Status.Kubernetes.Ready = remotecluster.IsNodeReady(node)
-			machine.Status.Kubernetes.NodeUID = string(node.UID)
-			currentMachineID := node.Status.NodeInfo.MachineID
-			if currentMachineID != "" {
-				if machine.Status.Kubernetes.MachineID != "" && machine.Status.Kubernetes.MachineID != currentMachineID {
-					log.Error(nil, "node machineID mismatch, possible host collision", "machine", machine.Name, "expected", machine.Status.Kubernetes.MachineID, "actual", currentMachineID)
-					if r.Recorder != nil {
-						r.Recorder.Eventf(&machine, corev1.EventTypeWarning, "MachineIDMismatch", "Node %s has different machineID %s (expected %s)", node.Name, currentMachineID, machine.Status.Kubernetes.MachineID)
-					}
-				}
-				machine.Status.Kubernetes.MachineID = currentMachineID
+			currentUID := string(node.UID)
+			currentMID := node.Status.NodeInfo.MachineID
+
+			// 管理者による明示的な Adopt (gha.walnuts.dev/adopt-machine-id アノテーション) の検証
+			adoptMID, hasAdopt := machine.Annotations[runner.AnnotationAdoptMachineID]
+			if hasAdopt && adoptMID == currentMID && currentMID != "" {
+				log.Info("adopting new machine identity from annotation", "machine", machine.Name, "newMachineID", currentMID)
+				machine.Status.Kubernetes.BoundMachineID = currentMID
+				machine.Status.Kubernetes.MachineID = currentMID
+				machine.Status.Kubernetes.NodeUID = currentUID
+				delete(machine.Annotations, runner.AnnotationAdoptMachineID)
+				_ = r.Update(ctx, &machine)
 			}
 
+			switch {
+			case machine.Status.Kubernetes.BoundMachineID == "" && currentMID != "":
+				// 初回バインディング
+				machine.Status.Kubernetes.BoundMachineID = currentMID
+				machine.Status.Kubernetes.MachineID = currentMID
+				machine.Status.Kubernetes.NodeUID = currentUID
+				machine.Status.Kubernetes.ObservedMachineID = currentMID
+				conditions.SetCondition(&machine.Status.Conditions, conditions.TypeIdentityValid, metav1.ConditionTrue, conditions.ReasonReady, "Machine identity bound")
+
+			case currentMID != "" && machine.Status.Kubernetes.BoundMachineID != currentMID:
+				// MachineID mismatch: 期待値を上書きせず、IdentityValid=False に倒して mutation/capacity をブロック
+				machine.Status.Kubernetes.ObservedMachineID = currentMID
+				machine.Status.Kubernetes.Ready = false
+				log.Error(nil, "node machineID mismatch, blocking machine actions until explicit adoption",
+					"machine", machine.Name, "expected", machine.Status.Kubernetes.BoundMachineID, "actual", currentMID)
+				if r.Recorder != nil {
+					r.Recorder.Eventf(&machine, corev1.EventTypeWarning, "MachineIDMismatch",
+						"Node %s has different machineID %s (expected %s); mutation blocked until explicit adoption",
+						node.Name, currentMID, machine.Status.Kubernetes.BoundMachineID)
+				}
+				conditions.SetCondition(&machine.Status.Conditions, conditions.TypeIdentityValid, metav1.ConditionFalse,
+					conditions.ReasonMachineIDMismatch, fmt.Sprintf("expected machineID %q, observed %q", machine.Status.Kubernetes.BoundMachineID, currentMID))
+				conditions.SetCondition(&machine.Status.Conditions, conditions.TypeKubernetesNodeReady, metav1.ConditionFalse,
+					conditions.ReasonMachineIDMismatch, "Node machine identity mismatch")
+				conditions.SetCondition(&machine.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse,
+					conditions.ReasonMachineIDMismatch, "Node identity invalid")
+				_ = r.updateStatus(ctx, &machine, origMachine)
+				return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
+
+			default:
+				// 同一 MachineID: Node 再作成の場合は NodeUID のみを更新
+				machine.Status.Kubernetes.NodeUID = currentUID
+				machine.Status.Kubernetes.ObservedMachineID = currentMID
+				conditions.SetCondition(&machine.Status.Conditions, conditions.TypeIdentityValid, metav1.ConditionTrue, conditions.ReasonReady, "Machine identity valid")
+			}
+
+			machine.Status.Kubernetes.Ready = remotecluster.IsNodeReady(node)
 			if machine.Status.Kubernetes.Ready {
 				conditions.SetCondition(&machine.Status.Conditions, conditions.TypeKubernetesNodeReady, metav1.ConditionTrue, conditions.ReasonNodeReady, "Kubernetes node is Ready")
 			} else {
@@ -558,6 +613,56 @@ func (r *RunnerMachineReconciler) getRedfishController(ctx context.Context, m *g
 
 func (r *RunnerMachineReconciler) updateStatus(ctx context.Context, m, orig *ghav1alpha1.RunnerMachine) error {
 	return r.Status().Patch(ctx, m, client.MergeFrom(orig))
+}
+
+func (r *RunnerMachineReconciler) recordRedfishFailure(machine *ghav1alpha1.RunnerMachine, now time.Time, err error) {
+	if machine.Status.RedfishHealth == nil {
+		machine.Status.RedfishHealth = &ghav1alpha1.RedfishHealthStatus{
+			Circuit: ghav1alpha1.RedfishCircuitClosed,
+		}
+	}
+	h := machine.Status.RedfishHealth
+	h.ConsecutiveFailures++
+
+	n := min(int(h.ConsecutiveFailures), 6)
+	base := 10 * time.Second
+	maxDelay := 5 * time.Minute
+	delay := min(base*time.Duration(1<<(n-1)), maxDelay)
+
+	jitterFraction := float64(time.Now().UnixNano()%1000) / 1000.0
+	jitterDelay := delay + time.Duration(float64(delay)*0.2*jitterFraction)
+
+	next := metav1.NewTime(now.Add(jitterDelay))
+	failureTime := metav1.NewTime(now)
+	h.LastFailureTime = &failureTime
+	h.NextProbeTime = &next
+
+	if h.ConsecutiveFailures >= 3 {
+		h.Circuit = ghav1alpha1.RedfishCircuitOpen
+	}
+
+	conditions.SetCondition(
+		&machine.Status.Conditions,
+		conditions.TypeRedfishReachable,
+		metav1.ConditionFalse,
+		conditions.ReasonUnsupportedRedfish,
+		fmt.Sprintf("Redfish request failed (consecutive failures: %d): %v", h.ConsecutiveFailures, err),
+	)
+}
+
+func (r *RunnerMachineReconciler) recordRedfishSuccess(machine *ghav1alpha1.RunnerMachine, now time.Time) {
+	successTime := metav1.NewTime(now)
+	machine.Status.RedfishHealth = &ghav1alpha1.RedfishHealthStatus{
+		Circuit:         ghav1alpha1.RedfishCircuitClosed,
+		LastSuccessTime: &successTime,
+	}
+	conditions.SetCondition(
+		&machine.Status.Conditions,
+		conditions.TypeRedfishReachable,
+		metav1.ConditionTrue,
+		conditions.ReasonAPISucceeded,
+		"Redfish endpoint is reachable",
+	)
 }
 
 func (r *RunnerMachineReconciler) findMachinesForNodePool(ctx context.Context, obj client.Object) []ctrl.Request {

@@ -442,3 +442,245 @@ func TestRunnerMachineReconciler_ExternalCordonProtection(t *testing.T) {
 		t.Errorf("expected externally cordoned node to remain Unschedulable=true")
 	}
 }
+
+func TestRunnerMachineReconciler_MachineIDMismatchAndExplicitAdoption(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = ghav1alpha1.AddToScheme(scheme)
+
+	cluster := &ghav1alpha1.RunnerCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Status: ghav1alpha1.RunnerClusterStatus{
+			APIReachable: true,
+		},
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "redfish-secret", Namespace: "default"},
+		Data: map[string][]byte{
+			"username": []byte("admin"),
+			"password": []byte("password"),
+		},
+	}
+
+	machine := &ghav1alpha1.RunnerMachine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "m1",
+			Namespace: "default",
+			UID:       "machine-uid-1",
+			Labels:    map[string]string{"pool": "p1"},
+		},
+		Spec: ghav1alpha1.RunnerMachineSpec{
+			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
+			KubernetesNodeName: "node1",
+			Capacity:           ghav1alpha1.RunnerMachineCapacity{Runners: 2},
+			Bootstrap:          true,
+			Redfish: ghav1alpha1.RedfishSpec{
+				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
+			},
+		},
+		Status: ghav1alpha1.RunnerMachineStatus{
+			PowerState: ghav1alpha1.PowerStateOn,
+			Kubernetes: ghav1alpha1.RunnerMachineKubernetesStatus{
+				BoundMachineID: "initial-machine-id-123",
+				MachineID:      "initial-machine-id-123",
+			},
+		},
+	}
+
+	nodePool := &ghav1alpha1.RunnerNodePool{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Spec: ghav1alpha1.RunnerNodePoolSpec{
+			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
+		},
+		Status: ghav1alpha1.RunnerNodePoolStatus{
+			DesiredMachines: []ghav1alpha1.MachinePlanStatus{
+				{Name: "m1", UID: "machine-uid-1", DesiredState: ghav1alpha1.MachineDesiredStateActive},
+			},
+		},
+	}
+
+	// 別のMachineIDを持つNode（OS再インストールやホスト衝突の再現）
+	collisionNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node1",
+			UID:  "node-uid-2",
+		},
+		Status: corev1.NodeStatus{
+			NodeInfo: corev1.NodeSystemInfo{
+				MachineID: "different-machine-id-456",
+			},
+			Conditions: []corev1.NodeCondition{
+				{Type: corev1.NodeReady, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cluster, secret, machine, nodePool).
+		WithStatusSubresource(machine, nodePool).
+		Build()
+
+	remoteClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(collisionNode).Build()
+	remoteProvider := &fakeRemoteProvider{client: remoteClient, node: collisionNode}
+	pwrCtrl := &fakePowerController{powerState: ghav1alpha1.PowerStateOn}
+	pwrFactory := &fakePowerControllerFactory{fakeCtrl: pwrCtrl}
+
+	r := &RunnerMachineReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RemoteProvider: remoteProvider,
+		RedfishFactory: pwrFactory,
+	}
+
+	// 1. Reconcile実行: MachineID Mismatch が検知され、BoundMachineID は上書きされずに保持されること
+	res, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: client.ObjectKey{Namespace: "default", Name: "m1"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.RequeueAfter != 1*time.Minute {
+		t.Errorf("expected 1m requeue on machineID mismatch, got %v", res.RequeueAfter)
+	}
+
+	var checkMachine ghav1alpha1.RunnerMachine
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "m1"}, &checkMachine); err != nil {
+		t.Fatalf("failed to get machine: %v", err)
+	}
+
+	if checkMachine.Status.Kubernetes.BoundMachineID != "initial-machine-id-123" {
+		t.Errorf("expected BoundMachineID to be preserved as 'initial-machine-id-123', got %q", checkMachine.Status.Kubernetes.BoundMachineID)
+	}
+	if checkMachine.Status.Kubernetes.ObservedMachineID != "different-machine-id-456" {
+		t.Errorf("expected ObservedMachineID to be 'different-machine-id-456', got %q", checkMachine.Status.Kubernetes.ObservedMachineID)
+	}
+	if checkMachine.Status.Kubernetes.Ready {
+		t.Errorf("expected machine Kubernetes.Ready to be false on mismatch")
+	}
+
+	// 2. 管理者が gha.walnuts.dev/adopt-machine-id アノテーションを付与した場合: 新MachineIDが採用されること
+	checkMachine.Annotations = map[string]string{
+		runner.AnnotationAdoptMachineID: "different-machine-id-456",
+	}
+	_ = fakeClient.Update(context.Background(), &checkMachine)
+
+	_, err = r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: client.ObjectKey{Namespace: "default", Name: "m1"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "m1"}, &checkMachine); err != nil {
+		t.Fatalf("failed to get machine: %v", err)
+	}
+
+	if checkMachine.Status.Kubernetes.BoundMachineID != "different-machine-id-456" {
+		t.Errorf("expected BoundMachineID to be adopted as 'different-machine-id-456', got %q", checkMachine.Status.Kubernetes.BoundMachineID)
+	}
+	if _, hasAnnot := checkMachine.Annotations[runner.AnnotationAdoptMachineID]; hasAnnot {
+		t.Errorf("expected adopt annotation to be consumed and removed")
+	}
+}
+
+func TestRunnerMachineReconciler_RedfishCircuitBreaker(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = ghav1alpha1.AddToScheme(scheme)
+
+	cluster := &ghav1alpha1.RunnerCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Status: ghav1alpha1.RunnerClusterStatus{
+			APIReachable: true,
+		},
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "redfish-secret", Namespace: "default"},
+		Data: map[string][]byte{
+			"username": []byte("admin"),
+			"password": []byte("password"),
+		},
+	}
+
+	futureProbe := metav1.NewTime(time.Now().Add(5 * time.Minute))
+	machine := &ghav1alpha1.RunnerMachine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "m1",
+			Namespace: "default",
+			UID:       "machine-uid-1",
+			Labels:    map[string]string{"pool": "p1"},
+		},
+		Spec: ghav1alpha1.RunnerMachineSpec{
+			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
+			KubernetesNodeName: "node1",
+			Capacity:           ghav1alpha1.RunnerMachineCapacity{Runners: 2},
+			Bootstrap:          true,
+			Redfish: ghav1alpha1.RedfishSpec{
+				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
+			},
+		},
+		Status: ghav1alpha1.RunnerMachineStatus{
+			PowerState: ghav1alpha1.PowerStateOn,
+			RedfishHealth: &ghav1alpha1.RedfishHealthStatus{
+				Circuit:             ghav1alpha1.RedfishCircuitOpen,
+				ConsecutiveFailures: 3,
+				NextProbeTime:       &futureProbe,
+			},
+		},
+	}
+
+	nodePool := &ghav1alpha1.RunnerNodePool{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Spec: ghav1alpha1.RunnerNodePoolSpec{
+			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
+		},
+		Status: ghav1alpha1.RunnerNodePoolStatus{
+			DesiredMachines: []ghav1alpha1.MachinePlanStatus{
+				{Name: "m1", UID: "machine-uid-1", DesiredState: ghav1alpha1.MachineDesiredStateActive},
+			},
+		},
+	}
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+		Status: corev1.NodeStatus{
+			NodeInfo: corev1.NodeSystemInfo{MachineID: "mid-1"},
+			Conditions: []corev1.NodeCondition{
+				{Type: corev1.NodeReady, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cluster, secret, machine, nodePool).
+		WithStatusSubresource(machine, nodePool).
+		Build()
+
+	remoteClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(node).Build()
+	remoteProvider := &fakeRemoteProvider{client: remoteClient, node: node}
+	pwrCtrl := &fakePowerController{powerState: ghav1alpha1.PowerStateOn}
+	pwrFactory := &fakePowerControllerFactory{fakeCtrl: pwrCtrl}
+
+	r := &RunnerMachineReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RemoteProvider: remoteProvider,
+		RedfishFactory: pwrFactory,
+	}
+
+	// CircuitOpen かつ NextProbeTime 未到達の場合: Redfish 呼び出しはスキップされ、電力状態は維持される
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: client.ObjectKey{Namespace: "default", Name: "m1"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if pwrCtrl.powerOnCalled || pwrCtrl.shutdownCalled || pwrCtrl.forceOffCalled {
+		t.Errorf("expected no Redfish power operations during open circuit breaker")
+	}
+}

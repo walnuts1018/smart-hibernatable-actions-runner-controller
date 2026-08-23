@@ -1,3 +1,4 @@
+// Package remotecluster provides client caching and connectivity operations for remote Kubernetes clusters.
 package remotecluster
 
 import (
@@ -16,8 +17,8 @@ import (
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 )
 
-// RemoteClusterProvider provides cached client and health operations for remote RunnerClusters.
-type RemoteClusterProvider interface {
+// Provider provides cached client and health operations for remote RunnerClusters.
+type Provider interface {
 	// GetClient returns a controller-runtime Client for the remote cluster.
 	GetClient(ctx context.Context, cluster *ghav1alpha1.RunnerCluster) (client.Client, error)
 
@@ -48,8 +49,8 @@ type providerImpl struct {
 	clients     map[string]*cachedClient
 }
 
-// NewProvider creates a new RemoteClusterProvider.
-func NewProvider(localClient client.Client, scheme *runtime.Scheme) RemoteClusterProvider {
+// NewProvider creates a new Provider.
+func NewProvider(localClient client.Client, scheme *runtime.Scheme) Provider {
 	return &providerImpl{
 		localClient: localClient,
 		scheme:      scheme,

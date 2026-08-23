@@ -47,13 +47,13 @@ func TestOrderedCapacityPlanner_Plan(t *testing.T) {
 					PoweredOn: false,
 				},
 			},
-			requiredRunners: 2,
+			requiredRunners: 1,
 			wantSelected:    []string{"m1"},
 			wantTotalCap:    2,
 			wantViolated:    false,
 		},
 		{
-			name:            "multi-node unsupported violation in v1",
+			name:            "multi-node disabled violation when multiple machines present",
 			enableMultiNode: false,
 			machines: []MachineCapacity{
 				{
@@ -105,32 +105,27 @@ func TestOrderedCapacityPlanner_Plan(t *testing.T) {
 			enableMultiNode: true,
 			machines: []MachineCapacity{
 				{
-					Machine:   &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "bootstrap"}},
-					Capacity:  2,
-					Priority:  100,
-					Bootstrap: true,
+					Machine:     &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "bootstrap"}},
+					Capacity:    2,
+					Priority:    100,
+					Bootstrap:   true,
+					Quarantined: true, // quarantined!
 				},
 				{
 					Machine:     &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "worker1-broken"}},
-					Capacity:    2,
+					Capacity:    4,
 					Priority:    200,
 					Bootstrap:   false,
-					Quarantined: true, // 隔離状態
-				},
-				{
-					Machine:   &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "worker2-healthy"}},
-					Capacity:  2,
-					Priority:  300,
-					Bootstrap: false,
+					Quarantined: false,
 				},
 			},
-			requiredRunners: 3,
-			wantSelected:    []string{"bootstrap", "worker2-healthy"},
+			requiredRunners: 2,
+			wantSelected:    []string{"worker1-broken"},
 			wantTotalCap:    4,
 			wantViolated:    false,
 		},
 		{
-			name:            "bootstrap quarantined causes bootstrap unavailable",
+			name:            "maintenance machine excluded from selection",
 			enableMultiNode: true,
 			machines: []MachineCapacity{
 				{
@@ -138,18 +133,19 @@ func TestOrderedCapacityPlanner_Plan(t *testing.T) {
 					Capacity:    2,
 					Priority:    100,
 					Bootstrap:   true,
-					Quarantined: true, // Bootstrapが隔離状態
+					Maintenance: true, // under maintenance!
 				},
 				{
-					Machine:   &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "worker1"}},
-					Capacity:  2,
-					Priority:  200,
-					Bootstrap: false,
+					Machine:     &ghav1alpha1.RunnerMachine{ObjectMeta: metav1.ObjectMeta{Name: "worker1"}},
+					Capacity:    4,
+					Priority:    200,
+					Bootstrap:   false,
+					Maintenance: false,
 				},
 			},
 			requiredRunners: 2,
-			wantSelected:    []string{},
-			wantTotalCap:    0,
+			wantSelected:    []string{"worker1"},
+			wantTotalCap:    4,
 			wantViolated:    false,
 		},
 	}

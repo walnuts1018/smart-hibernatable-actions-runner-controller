@@ -5,11 +5,11 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 )
 
+// JIT configuration constants.
 const (
 	JitConfigSecretKey = "jitconfig"
 	EnvJitConfig       = "ACTIONS_RUNNER_INPUT_JITCONFIG"
@@ -34,7 +34,7 @@ func BuildJitSecret(namespace string, runner *ghav1alpha1.EphemeralRunner, jitCo
 			},
 		},
 		Type:      corev1.SecretTypeOpaque,
-		Immutable: ptr.To(true),
+		Immutable: new(true),
 		StringData: map[string]string{
 			JitConfigSecretKey: jitConfig,
 		},

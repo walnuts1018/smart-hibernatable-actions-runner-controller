@@ -12,7 +12,7 @@ import (
 
 var readinessLogger = ctrl.Log.WithName("listener-readiness")
 
-// ReadinessTrackerはListenerの準備完了状態を追跡します。
+// ReadinessTracker tracks the ready state of the listener.
 type ReadinessTracker struct {
 	mu                        sync.RWMutex
 	leaseAcquired             bool
@@ -21,40 +21,40 @@ type ReadinessTracker struct {
 	initialStatisticsReceived bool
 }
 
-// NewReadinessTrackerは新しいReadinessTrackerを初期化します。
+// NewReadinessTracker initializes a new ReadinessTracker.
 func NewReadinessTracker() *ReadinessTracker {
 	return &ReadinessTracker{}
 }
 
-// SetLeaseAcquiredはLease取得状態を更新します。
+// SetLeaseAcquired updates the lease acquired state.
 func (r *ReadinessTracker) SetLeaseAcquired(val bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.leaseAcquired = val
 }
 
-// SetGitHubAuthenticatedはGitHub認証状態を更新します。
+// SetGitHubAuthenticated updates the GitHub authenticated state.
 func (r *ReadinessTracker) SetGitHubAuthenticated(val bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.githubAuthenticated = val
 }
 
-// SetSessionEstablishedはGitHubセッション確立状態を更新します。
+// SetSessionEstablished updates the GitHub session established state.
 func (r *ReadinessTracker) SetSessionEstablished(val bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.sessionEstablished = val
 }
 
-// SetInitialStatisticsReceivedは初回統計情報の受信状態を更新します。
+// SetInitialStatisticsReceived updates the initial statistics received state.
 func (r *ReadinessTracker) SetInitialStatisticsReceived(val bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.initialStatisticsReceived = val
 }
 
-// Resetはセッション切断時などに状態をリセットします。
+// Reset resets the tracking state on disconnection.
 func (r *ReadinessTracker) Reset() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -63,25 +63,25 @@ func (r *ReadinessTracker) Reset() {
 	r.initialStatisticsReceived = false
 }
 
-// IsReadyはすべてのReadiness条件が満たされているかを判定します。
+// IsReady returns true if all readiness conditions are satisfied.
 func (r *ReadinessTracker) IsReady() bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.leaseAcquired && r.githubAuthenticated && r.sessionEstablished && r.initialStatisticsReceived
 }
 
-// StartHTTPServerはProbeおよびMetrics用のHTTPサーバーを起動します。
+// StartHTTPServer starts the HTTP server for probes and metrics.
 func StartHTTPServer(ctx context.Context, probeAddr, metricsAddr string, tracker *ReadinessTracker) error {
 	mux := http.NewServeMux()
 
 	// Liveness probe:プロセスが生存していれば200OK
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, req *http.Request) {
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
 
 	// Readiness probe:全条件が揃っている場合のみ200OK
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, req *http.Request) {
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
 		if tracker.IsReady() {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("ready"))
@@ -126,7 +126,7 @@ func StartHTTPServer(ctx context.Context, probeAddr, metricsAddr string, tracker
 
 	go func() {
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = probeServer.Shutdown(shutdownCtx)
 		if metricsServer != nil {

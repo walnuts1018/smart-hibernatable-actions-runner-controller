@@ -44,12 +44,18 @@ func (r *RunnerScaleSet) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 var _ admission.Defaulter[*RunnerScaleSet] = &RunnerScaleSet{}
 
+const (
+	defaultRunnerGroup   = "default"
+	defaultContainerName = "runner"
+	defaultWorkDir       = "_work"
+)
+
 // Default implements admission.Defaulter so a webhook will be registered for the type
-func (r *RunnerScaleSet) Default(ctx context.Context, obj *RunnerScaleSet) error {
+func (r *RunnerScaleSet) Default(_ context.Context, obj *RunnerScaleSet) error {
 	runnerscalesetlog.Info("defaulting RunnerScaleSet", "name", obj.Name)
 
 	if obj.Spec.GitHub.RunnerGroup == "" {
-		obj.Spec.GitHub.RunnerGroup = "default"
+		obj.Spec.GitHub.RunnerGroup = defaultRunnerGroup
 	}
 	if obj.Spec.Scaling.MinRunners < 0 {
 		obj.Spec.Scaling.MinRunners = 0
@@ -58,10 +64,10 @@ func (r *RunnerScaleSet) Default(ctx context.Context, obj *RunnerScaleSet) error
 		obj.Spec.Scaling.MaxRunners = 2
 	}
 	if obj.Spec.Runner.ContainerName == "" {
-		obj.Spec.Runner.ContainerName = "runner"
+		obj.Spec.Runner.ContainerName = defaultContainerName
 	}
 	if obj.Spec.Runner.WorkDir == "" {
-		obj.Spec.Runner.WorkDir = "_work"
+		obj.Spec.Runner.WorkDir = defaultWorkDir
 	}
 	return nil
 }
@@ -71,13 +77,13 @@ func (r *RunnerScaleSet) Default(ctx context.Context, obj *RunnerScaleSet) error
 var _ admission.Validator[*RunnerScaleSet] = &RunnerScaleSet{}
 
 // ValidateCreate implements admission.Validator so a webhook will be registered for the type
-func (r *RunnerScaleSet) ValidateCreate(ctx context.Context, obj *RunnerScaleSet) (admission.Warnings, error) {
+func (r *RunnerScaleSet) ValidateCreate(_ context.Context, obj *RunnerScaleSet) (admission.Warnings, error) {
 	runnerscalesetlog.Info("validate create RunnerScaleSet", "name", obj.Name)
 	return nil, obj.validateRunnerScaleSet()
 }
 
 // ValidateUpdate implements admission.Validator so a webhook will be registered for the type
-func (r *RunnerScaleSet) ValidateUpdate(ctx context.Context, oldObj, newObj *RunnerScaleSet) (admission.Warnings, error) {
+func (r *RunnerScaleSet) ValidateUpdate(_ context.Context, oldObj, newObj *RunnerScaleSet) (admission.Warnings, error) {
 	runnerscalesetlog.Info("validate update RunnerScaleSet", "name", newObj.Name)
 
 	var allErrs field.ErrorList
@@ -104,14 +110,8 @@ func (r *RunnerScaleSet) ValidateUpdate(ctx context.Context, oldObj, newObj *Run
 		))
 	}
 
-	if err := newObj.validateRunnerScaleSet(); err != nil {
-		if statusErr, ok := err.(*apierrors.StatusError); ok {
-			for _, detail := range statusErr.ErrStatus.Details.Causes {
-				allErrs = append(allErrs, field.Invalid(field.NewPath(detail.Field), "", detail.Message))
-			}
-		} else {
-			return nil, err
-		}
+	if err := appendStatusErrorCauses(&allErrs, newObj.validateRunnerScaleSet()); err != nil {
+		return nil, err
 	}
 
 	if len(allErrs) > 0 {
@@ -126,7 +126,7 @@ func (r *RunnerScaleSet) ValidateUpdate(ctx context.Context, oldObj, newObj *Run
 }
 
 // ValidateDelete implements admission.Validator so a webhook will be registered for the type
-func (r *RunnerScaleSet) ValidateDelete(ctx context.Context, obj *RunnerScaleSet) (admission.Warnings, error) {
+func (r *RunnerScaleSet) ValidateDelete(_ context.Context, obj *RunnerScaleSet) (admission.Warnings, error) {
 	runnerscalesetlog.Info("validate delete RunnerScaleSet", "name", obj.Name)
 	return nil, nil
 }

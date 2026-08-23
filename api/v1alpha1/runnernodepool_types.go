@@ -26,6 +26,7 @@ import (
 // +kubebuilder:validation:Enum=Ordered
 type ScalingStrategy string
 
+// Scaling strategy constants.
 const (
 	ScalingStrategyOrdered ScalingStrategy = "Ordered"
 )
@@ -60,6 +61,7 @@ type RunnerNodePoolScalingSpec struct {
 type RunnerNodePoolSpec struct {
 	// ClusterRef references the RunnerCluster associated with this node pool.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="clusterRef is immutable"
 	ClusterRef corev1.LocalObjectReference `json:"clusterRef"`
 
 	// MachineSelector selects RunnerMachine resources that belong to this pool.
@@ -112,6 +114,7 @@ type RunnerNodePoolStatus struct {
 // +kubebuilder:validation:Enum=Active;Off
 type MachineDesiredState string
 
+// Machine desired states.
 const (
 	MachineDesiredStateActive MachineDesiredState = "Active"
 	MachineDesiredStateOff    MachineDesiredState = "Off"

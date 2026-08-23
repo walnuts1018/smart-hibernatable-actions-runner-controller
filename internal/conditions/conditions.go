@@ -1,3 +1,4 @@
+// Package conditions defines standard status condition types and reasons.
 package conditions
 
 import (
@@ -19,6 +20,7 @@ const (
 	TypeKubernetesNodeReady = "KubernetesNodeReady"
 	TypeQuarantined         = "Quarantined"
 	TypeMaintenance         = "Maintenance"
+	TypeIdentityValid       = "IdentityValid"
 
 	// RunnerNodePool
 	TypeMachinesReady = "MachinesReady"
@@ -83,6 +85,7 @@ const (
 	ReasonMaintenance             = "Maintenance"
 	ReasonQuarantined             = "Quarantined"
 	ReasonClusterIdentityMismatch = "ClusterIdentityMismatch"
+	ReasonMachineIDMismatch       = "MachineIDMismatch"
 	ReasonBootstrapUnavailable    = "BootstrapUnavailable"
 )
 

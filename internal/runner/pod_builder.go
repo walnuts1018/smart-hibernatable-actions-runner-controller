@@ -1,6 +1,8 @@
 package runner
 
 import (
+	"maps"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -16,7 +18,7 @@ func BuildRunnerPod(namespace string, scaleSet *ghav1alpha1.RunnerScaleSet, runn
 
 	targetContainerName := scaleSet.Spec.Runner.ContainerName
 	if targetContainerName == "" {
-		targetContainerName = "runner"
+		targetContainerName = DefaultContainerName
 	}
 
 	jitSecretName := JitSecretName(runner.Spec.RunnerName)
@@ -48,9 +50,7 @@ func BuildRunnerPod(namespace string, scaleSet *ghav1alpha1.RunnerScaleSet, runn
 
 	// Merge labels
 	labels := make(map[string]string)
-	for k, v := range template.Labels {
-		labels[k] = v
-	}
+	maps.Copy(labels, template.Labels)
 	labels[LabelManagedBy] = LabelManagedByValue
 	labels[LabelScaleSetUID] = string(scaleSet.UID)
 	labels[LabelScaleSetName] = scaleSet.Name
@@ -58,9 +58,7 @@ func BuildRunnerPod(namespace string, scaleSet *ghav1alpha1.RunnerScaleSet, runn
 	labels[LabelRunnerName] = runner.Spec.RunnerName
 
 	annotations := make(map[string]string)
-	for k, v := range template.Annotations {
-		annotations[k] = v
-	}
+	maps.Copy(annotations, template.Annotations)
 
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{

@@ -80,6 +80,9 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: clusterRef is immutable
+                  rule: self == oldSelf
               machineSelector:
                 description: MachineSelector selects RunnerMachine resources that
                   belong to this pool.

@@ -46,7 +46,7 @@ func (r *RunnerNodePool) SetupWebhookWithManager(mgr ctrl.Manager) error {
 var _ admission.Defaulter[*RunnerNodePool] = &RunnerNodePool{}
 
 // Default implements admission.Defaulter so a webhook will be registered for the type
-func (r *RunnerNodePool) Default(ctx context.Context, obj *RunnerNodePool) error {
+func (r *RunnerNodePool) Default(_ context.Context, obj *RunnerNodePool) error {
 	runnernodepoollog.Info("defaulting RunnerNodePool", "name", obj.Name)
 
 	if obj.Spec.Scaling.Strategy == "" {
@@ -69,13 +69,13 @@ func (r *RunnerNodePool) Default(ctx context.Context, obj *RunnerNodePool) error
 var _ admission.Validator[*RunnerNodePool] = &RunnerNodePool{}
 
 // ValidateCreate implements admission.Validator so a webhook will be registered for the type
-func (r *RunnerNodePool) ValidateCreate(ctx context.Context, obj *RunnerNodePool) (admission.Warnings, error) {
+func (r *RunnerNodePool) ValidateCreate(_ context.Context, obj *RunnerNodePool) (admission.Warnings, error) {
 	runnernodepoollog.Info("validate create RunnerNodePool", "name", obj.Name)
 	return nil, obj.validateRunnerNodePool()
 }
 
 // ValidateUpdate implements admission.Validator so a webhook will be registered for the type
-func (r *RunnerNodePool) ValidateUpdate(ctx context.Context, oldObj, newObj *RunnerNodePool) (admission.Warnings, error) {
+func (r *RunnerNodePool) ValidateUpdate(_ context.Context, oldObj, newObj *RunnerNodePool) (admission.Warnings, error) {
 	runnernodepoollog.Info("validate update RunnerNodePool", "name", newObj.Name)
 
 	var allErrs field.ErrorList
@@ -88,14 +88,8 @@ func (r *RunnerNodePool) ValidateUpdate(ctx context.Context, oldObj, newObj *Run
 		))
 	}
 
-	if err := newObj.validateRunnerNodePool(); err != nil {
-		if statusErr, ok := err.(*apierrors.StatusError); ok {
-			for _, detail := range statusErr.ErrStatus.Details.Causes {
-				allErrs = append(allErrs, field.Invalid(field.NewPath(detail.Field), "", detail.Message))
-			}
-		} else {
-			return nil, err
-		}
+	if err := appendStatusErrorCauses(&allErrs, newObj.validateRunnerNodePool()); err != nil {
+		return nil, err
 	}
 
 	if len(allErrs) > 0 {
@@ -110,7 +104,7 @@ func (r *RunnerNodePool) ValidateUpdate(ctx context.Context, oldObj, newObj *Run
 }
 
 // ValidateDelete implements admission.Validator so a webhook will be registered for the type
-func (r *RunnerNodePool) ValidateDelete(ctx context.Context, obj *RunnerNodePool) (admission.Warnings, error) {
+func (r *RunnerNodePool) ValidateDelete(_ context.Context, obj *RunnerNodePool) (admission.Warnings, error) {
 	runnernodepoollog.Info("validate delete RunnerNodePool", "name", obj.Name)
 	return nil, nil
 }

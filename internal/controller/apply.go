@@ -7,7 +7,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	metav1apply "k8s.io/client-go/applyconfigurations/meta/v1"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
@@ -45,6 +44,6 @@ func applyResource(ctx context.Context, c client.Client, applyConfig any) error 
 
 	return c.Patch(ctx, patch, client.Apply, &client.PatchOptions{
 		FieldManager: FieldManagerName,
-		Force:        ptr.To(true),
+		Force:        new(true),
 	})
 }
