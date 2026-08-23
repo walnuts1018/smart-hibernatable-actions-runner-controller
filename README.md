@@ -1,2 +1,2 @@
-# smart-hibernatable-actions-runner-controller
+# SHARC (smart-hibernatable-actions-runner-controller)
 🦈
