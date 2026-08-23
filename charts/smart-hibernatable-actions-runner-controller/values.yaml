@@ -1,0 +1,70 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/walnuts1018/smart-hibernatable-actions-runner-controller/manager
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+listenerImage:
+  repository: ghcr.io/walnuts1018/smart-hibernatable-actions-runner-controller/listener
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podSecurityContext:
+  runAsNonRoot: true
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+webhook:
+  enabled: false
+  port: 9443
+  certManager:
+    enabled: true
+    certSecretName: ""
+
+metrics:
+  service:
+    enabled: true
+    port: 8080
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    additionalLabels: {}
+  prometheusRule:
+    enabled: false
+    additionalLabels: {}
+    rules:
+      listenerDisconnected: true
+      listenerPollStale: true
+      gitHubAuthFailed: true
+      capacityDeficit: true
+      machineStartupStuck: true
+      forceOffUsed: true
+

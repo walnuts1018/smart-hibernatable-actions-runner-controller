@@ -1,0 +1,17 @@
+{{- if .Values.metrics.service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gha-baremetal-operator.fullname" . }}-metrics
+  labels:
+    {{- include "gha-baremetal-operator.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.service.port }}
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    {{- include "gha-baremetal-operator.selectorLabels" . | nindent 4 }}
+{{- end }}

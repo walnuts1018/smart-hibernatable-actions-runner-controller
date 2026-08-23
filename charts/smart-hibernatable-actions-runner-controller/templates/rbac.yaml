@@ -1,0 +1,108 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "gha-baremetal-operator.fullname" . }}-manager-role
+rules:
+- apiGroups:
+  - gha.walnuts.dev
+  resources:
+  - runnerclusters
+  - runnermachines
+  - runnernodepools
+  - runnerscalesets
+  - ephemeralrunners
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - gha.walnuts.dev
+  resources:
+  - runnerclusters/status
+  - runnermachines/status
+  - runnernodepools/status
+  - runnerscalesets/status
+  - ephemeralrunners/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - gha.walnuts.dev
+  resources:
+  - runnerclusters/finalizers
+  - runnermachines/finalizers
+  - runnernodepools/finalizers
+  - runnerscalesets/finalizers
+  - ephemeralrunners/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - roles
+  - rolebindings
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  - secrets
+  - configmaps
+  - events
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "gha-baremetal-operator.fullname" . }}-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "gha-baremetal-operator.fullname" . }}-manager-role
+subjects:
+- kind: ServiceAccount
+  name: {{ .Values.serviceAccount.name | default (include "gha-baremetal-operator.fullname" .) }}
+  namespace: {{ .Release.Namespace }}

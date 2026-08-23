@@ -1,0 +1,27 @@
+{{- if and .Values.webhook.enabled .Values.webhook.certManager.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "gha-baremetal-operator.fullname" . }}-selfsigned-issuer
+  labels:
+    app.kubernetes.io/name: {{ include "gha-baremetal-operator.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "gha-baremetal-operator.fullname" . }}-serving-cert
+  labels:
+    app.kubernetes.io/name: {{ include "gha-baremetal-operator.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  dnsNames:
+  - {{ include "gha-baremetal-operator.fullname" . }}-webhook-service.{{ .Release.Namespace }}.svc
+  - {{ include "gha-baremetal-operator.fullname" . }}-webhook-service.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: {{ include "gha-baremetal-operator.fullname" . }}-selfsigned-issuer
+  secretName: {{ .Values.webhook.certManager.certSecretName | default (printf "%s-webhook-cert" (include "gha-baremetal-operator.fullname" .)) }}
+{{- end }}

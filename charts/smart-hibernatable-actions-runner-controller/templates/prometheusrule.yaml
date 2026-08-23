@@ -1,0 +1,54 @@
+{{- if and .Values.metrics.service.enabled .Values.metrics.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "gha-baremetal-operator.fullname" . }}
+  labels:
+    {{- include "gha-baremetal-operator.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: sharc.rules
+      rules:
+        {{- if .Values.metrics.prometheusRule.rules.listenerDisconnected }}
+        - alert: SHARCListenerDisconnected
+          annotations:
+            description: "Runner scale set listener session for {{`{{ $labels.name }}`}} in namespace {{`{{ $labels.namespace }}`}} is down for more than 2 minutes."
+            summary: "SHARC Listener session disconnected"
+          expr: gha_listener_session_up == 0
+          for: 2m
+          labels:
+            severity: warning
+        {{- end }}
+        {{- if .Values.metrics.prometheusRule.rules.listenerPollStale }}
+        - alert: SHARCListenerPollStale
+          annotations:
+            description: "Listener session for {{`{{ $labels.name }}`}} in namespace {{`{{ $labels.namespace }}`}} has not polled GitHub Actions message queue for more than 3 minutes."
+            summary: "SHARC Listener poll is stale"
+          expr: (time() - gha_listener_last_successful_poll_timestamp_seconds) > 180
+          for: 2m
+          labels:
+            severity: warning
+        {{- end }}
+        {{- if .Values.metrics.prometheusRule.rules.capacityDeficit }}
+        - alert: SHARCCapacityDeficit
+          annotations:
+            description: "Runner capacity deficit exists for {{`{{ $labels.name }}`}} in namespace {{`{{ $labels.namespace }}`}} for more than 10 minutes."
+            summary: "SHARC runner capacity deficit"
+          expr: gha_runner_capacity_deficit > 0
+          for: 10m
+          labels:
+            severity: warning
+        {{- end }}
+        {{- if .Values.metrics.prometheusRule.rules.forceOffUsed }}
+        - alert: SHARCForceOffUsed
+          annotations:
+            description: "Hard force-off power cut was used on machine {{`{{ $labels.name }}`}} in namespace {{`{{ $labels.namespace }}`}}."
+            summary: "SHARC machine force-off used"
+          expr: increase(gha_baremetal_power_transitions_total{action="ForceOff"}[10m]) > 0
+          labels:
+            severity: warning
+        {{- end }}
+{{- end }}
