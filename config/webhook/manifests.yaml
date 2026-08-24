@@ -10,6 +10,26 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
+      path: /mutate-gha-walnuts-dev-v1alpha1-ephemeralrunnerset
+  failurePolicy: Fail
+  name: mephemeralrunnerset.kb.io
+  rules:
+  - apiGroups:
+    - gha.walnuts.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - ephemeralrunnersets
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
       path: /mutate-gha-walnuts-dev-v1alpha1-runnercluster
   failurePolicy: Fail
   name: mrunnercluster.kb.io
@@ -109,6 +129,26 @@ webhooks:
     - UPDATE
     resources:
     - ephemeralrunners
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-gha-walnuts-dev-v1alpha1-ephemeralrunnerset
+  failurePolicy: Fail
+  name: vephemeralrunnerset.kb.io
+  rules:
+  - apiGroups:
+    - gha.walnuts.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - ephemeralrunnersets
   sideEffects: None
 - admissionReviewVersions:
   - v1

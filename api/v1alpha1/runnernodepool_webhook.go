@@ -18,7 +18,6 @@ package v1alpha1
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -49,17 +48,18 @@ var _ admission.Defaulter[*RunnerNodePool] = &RunnerNodePool{}
 func (r *RunnerNodePool) Default(_ context.Context, obj *RunnerNodePool) error {
 	runnernodepoollog.Info("defaulting RunnerNodePool", "name", obj.Name)
 
-	if obj.Spec.Scaling.Strategy == "" {
-		obj.Spec.Scaling.Strategy = ScalingStrategyOrdered
-	}
 	if obj.Spec.Scaling.MinNodes < 0 {
 		obj.Spec.Scaling.MinNodes = 0
 	}
-	if obj.Spec.Scaling.MaxNodes <= 0 {
-		obj.Spec.Scaling.MaxNodes = 1
-	}
 	if obj.Spec.Scaling.ScaleDownDelay == nil {
 		obj.Spec.Scaling.ScaleDownDelay = &metav1.Duration{Duration: 10 * time.Minute}
+	}
+	if obj.Spec.Drain == nil {
+		obj.Spec.Drain = &NodePoolDrainSpec{
+			Timeout: &metav1.Duration{Duration: 10 * time.Minute},
+		}
+	} else if obj.Spec.Drain.Timeout == nil {
+		obj.Spec.Drain.Timeout = &metav1.Duration{Duration: 10 * time.Minute}
 	}
 	return nil
 }
@@ -125,22 +125,6 @@ func (r *RunnerNodePool) validateRunnerNodePool() error {
 		))
 	}
 
-	// MachineSelector検証
-	if len(r.Spec.MachineSelector.MatchLabels) == 0 && len(r.Spec.MachineSelector.MatchExpressions) == 0 {
-		allErrs = append(allErrs, field.Required(
-			field.NewPath("spec", "machineSelector"),
-			"machineSelector must have at least one match label or expression",
-		))
-	} else {
-		if _, err := metav1.LabelSelectorAsSelector(&r.Spec.MachineSelector); err != nil {
-			allErrs = append(allErrs, field.Invalid(
-				field.NewPath("spec", "machineSelector"),
-				r.Spec.MachineSelector,
-				fmt.Sprintf("invalid machine selector: %v", err),
-			))
-		}
-	}
-
 	// Scaling検証
 	if r.Spec.Scaling.MinNodes < 0 {
 		allErrs = append(allErrs, field.Invalid(
@@ -150,28 +134,22 @@ func (r *RunnerNodePool) validateRunnerNodePool() error {
 		))
 	}
 
-	if r.Spec.Scaling.MaxNodes < 1 {
-		allErrs = append(allErrs, field.Invalid(
-			field.NewPath("spec", "scaling", "maxNodes"),
-			r.Spec.Scaling.MaxNodes,
-			"maxNodes must be greater than or equal to 1",
-		))
-	}
+	if r.Spec.Scaling.MaxNodes != nil {
+		if *r.Spec.Scaling.MaxNodes < 1 {
+			allErrs = append(allErrs, field.Invalid(
+				field.NewPath("spec", "scaling", "maxNodes"),
+				*r.Spec.Scaling.MaxNodes,
+				"maxNodes must be greater than or equal to 1",
+			))
+		}
 
-	if r.Spec.Scaling.MinNodes > r.Spec.Scaling.MaxNodes {
-		allErrs = append(allErrs, field.Invalid(
-			field.NewPath("spec", "scaling", "minNodes"),
-			r.Spec.Scaling.MinNodes,
-			"minNodes must be less than or equal to maxNodes",
-		))
-	}
-
-	if r.Spec.Scaling.Strategy != "" && r.Spec.Scaling.Strategy != ScalingStrategyOrdered {
-		allErrs = append(allErrs, field.NotSupported(
-			field.NewPath("spec", "scaling", "strategy"),
-			r.Spec.Scaling.Strategy,
-			[]string{string(ScalingStrategyOrdered)},
-		))
+		if r.Spec.Scaling.MinNodes > *r.Spec.Scaling.MaxNodes {
+			allErrs = append(allErrs, field.Invalid(
+				field.NewPath("spec", "scaling", "minNodes"),
+				r.Spec.Scaling.MinNodes,
+				"minNodes must be less than or equal to maxNodes",
+			))
+		}
 	}
 
 	if r.Spec.Scaling.ScaleDownDelay != nil && r.Spec.Scaling.ScaleDownDelay.Duration <= 0 {

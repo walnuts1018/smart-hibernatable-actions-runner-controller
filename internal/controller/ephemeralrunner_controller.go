@@ -53,6 +53,7 @@ func (r *EphemeralRunnerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	origRunner := epRunner.DeepCopy()
+	epRunner.Status.ObservedGeneration = epRunner.Generation
 
 	// 1.Finalizer処理（親リソースが削除済みでも安全にFinalizerを除去できるように先行判定）
 	if !epRunner.DeletionTimestamp.IsZero() {
@@ -323,7 +324,7 @@ func (r *EphemeralRunnerReconciler) ensureJitSecret(
 			}
 		}
 
-		jitResp, genErr := ghaClient.GenerateJITConfig(ctx, scaleSet.Status.ScaleSetID, epRunner.Status.Provisioning.RunnerName, scaleSet.Spec.Runner.WorkDir)
+		jitResp, genErr := ghaClient.GenerateJITConfig(ctx, scaleSet.Status.ScaleSetID, epRunner.Status.Provisioning.RunnerName, runner.DefaultWorkDir)
 		if genErr != nil {
 			log.Error(genErr, "failed to generate JIT runner config, checking for ambiguous creation", "runnerName", epRunner.Status.Provisioning.RunnerName)
 

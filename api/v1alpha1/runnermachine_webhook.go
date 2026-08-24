@@ -49,17 +49,24 @@ var _ admission.Defaulter[*RunnerMachine] = &RunnerMachine{}
 func (r *RunnerMachine) Default(_ context.Context, obj *RunnerMachine) error {
 	runnermachinelog.Info("defaulting RunnerMachine", "name", obj.Name)
 
-	if obj.Spec.Priority == 0 {
-		obj.Spec.Priority = 100
+	if obj.Spec.PowerPolicy == "" {
+		obj.Spec.PowerPolicy = RunnerMachinePowerPolicyOnDemand
 	}
 	if obj.Spec.Redfish.SystemID == "" {
 		obj.Spec.Redfish.SystemID = "1"
 	}
-	if obj.Spec.Redfish.Power.ShutdownTimeout == nil {
-		obj.Spec.Redfish.Power.ShutdownTimeout = &metav1.Duration{Duration: 3 * time.Minute}
+	if obj.Spec.Redfish.Power.Shutdown.Timeout == nil {
+		obj.Spec.Redfish.Power.Shutdown.Timeout = &metav1.Duration{Duration: 3 * time.Minute}
 	}
-	if obj.Spec.Redfish.Power.ForceOffAfter == nil {
-		obj.Spec.Redfish.Power.ForceOffAfter = &metav1.Duration{Duration: 0}
+	if obj.Spec.Redfish.Power.Shutdown.TimeoutPolicy == "" {
+		obj.Spec.Redfish.Power.Shutdown.TimeoutPolicy = RedfishTimeoutPolicyAbort
+	}
+	if obj.Spec.Drain == nil {
+		obj.Spec.Drain = &MachineDrainSpec{
+			Timeout: &metav1.Duration{Duration: 10 * time.Minute},
+		}
+	} else if obj.Spec.Drain.Timeout == nil {
+		obj.Spec.Drain.Timeout = &metav1.Duration{Duration: 10 * time.Minute}
 	}
 	return nil
 }
@@ -85,7 +92,7 @@ func (r *RunnerMachine) ValidateUpdate(_ context.Context, oldObj, newObj *Runner
 
 	var allErrs field.ErrorList
 	validateImmutableString(&allErrs, field.NewPath("spec", "clusterRef", "name"), oldObj.Spec.ClusterRef.Name, newObj.Spec.ClusterRef.Name)
-	validateImmutableString(&allErrs, field.NewPath("spec", "kubernetesNodeName"), oldObj.Spec.KubernetesNodeName, newObj.Spec.KubernetesNodeName)
+	validateImmutableString(&allErrs, field.NewPath("spec", "nodeName"), oldObj.Spec.NodeName, newObj.Spec.NodeName)
 
 	if err := appendStatusErrorCauses(&allErrs, newObj.validateRunnerMachine()); err != nil {
 		return nil, err
@@ -119,20 +126,20 @@ func (r *RunnerMachine) validateRunnerMachine() error {
 		))
 	}
 
-	// KubernetesNodeName検証
-	if r.Spec.KubernetesNodeName == "" {
+	// NodeName検証
+	if r.Spec.NodeName == "" {
 		allErrs = append(allErrs, field.Required(
-			field.NewPath("spec", "kubernetesNodeName"),
-			"kubernetesNodeName must not be empty",
+			field.NewPath("spec", "nodeName"),
+			"nodeName must not be empty",
 		))
 	}
 
 	// Capacity検証
-	if r.Spec.Capacity.Runners < 1 {
+	if r.Spec.Capacity.RunnerSlots < 1 {
 		allErrs = append(allErrs, field.Invalid(
-			field.NewPath("spec", "capacity", "runners"),
-			r.Spec.Capacity.Runners,
-			"capacity runners must be greater than or equal to 1",
+			field.NewPath("spec", "capacity", "runnerSlots"),
+			r.Spec.Capacity.RunnerSlots,
+			"capacity runnerSlots must be greater than or equal to 1",
 		))
 	}
 
@@ -161,12 +168,12 @@ func (r *RunnerMachine) validateRunnerMachine() error {
 		))
 	}
 
-	// Redfish Power ShutdownTimeout検証
-	if r.Spec.Redfish.Power.ShutdownTimeout != nil && r.Spec.Redfish.Power.ShutdownTimeout.Duration <= 0 {
+	// Redfish Power Shutdown Timeout検証
+	if r.Spec.Redfish.Power.Shutdown.Timeout != nil && r.Spec.Redfish.Power.Shutdown.Timeout.Duration <= 0 {
 		allErrs = append(allErrs, field.Invalid(
-			field.NewPath("spec", "redfish", "power", "shutdownTimeout"),
-			r.Spec.Redfish.Power.ShutdownTimeout.Duration.String(),
-			"shutdownTimeout must be greater than 0",
+			field.NewPath("spec", "redfish", "power", "shutdown", "timeout"),
+			r.Spec.Redfish.Power.Shutdown.Timeout.Duration.String(),
+			"timeout must be greater than 0",
 		))
 	}
 

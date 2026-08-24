@@ -23,7 +23,9 @@ const (
 	FinalizerScaleSetCleanup       = "gha.walnuts.dev/runner-scale-set"
 	IndexGitHubRunnerName          = "gha.walnuts.dev/github-runner-name"
 	DefaultContainerName           = "runner"
+	DefaultWorkDir                 = "_work"
 	DefaultRunnerNamespace         = "gha-runners"
+	DefaultListenerImage           = "ghcr.io/walnuts1018/smart-hibernatable-actions-runner-controller/listener:latest"
 )
 
 // GenerateRunnerName creates a unique runner name from the scale set name.

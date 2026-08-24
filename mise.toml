@@ -9,6 +9,7 @@ kubectl = "1.36.4"
 jq = "1.8.2"
 go = "1.27.0"
 shellcheck = "0.11.0"
+actionlint = "1.7.12"
 gh = "2.98.0"
 devcontainer-cli = "0.88.0"
 
@@ -36,13 +37,41 @@ description = "Run tests"
 depends = ["manifests", "generate", "fmt", "vet"]
 run = 'KUBEBUILDER_ASSETS="$(setup-envtest use -p path)" go test $(go list ./... | grep -v /e2e) -coverprofile cover.out'
 
+[tasks."build-golangci-lint"]
+description = "Build custom golangci-lint binary with module plugins"
+sources = [".custom-gcl.yml"]
+outputs = ["bin/custom-gcl"]
+run = "golangci-lint custom"
+
+[tasks."golangci-lint"]
+description = "Run custom golangci-lint"
+depends = ["build-golangci-lint"]
+run = "./bin/custom-gcl"
+
 [tasks.lint]
-description = "Run linter"
-run = "golangci-lint run ./..."
+description = "Run all linters"
+depends = ["lint:workspace", "build-golangci-lint"]
+run = "./bin/custom-gcl run ./..."
 
 [tasks."lint:fix"]
 description = "Run linter and perform fixes"
-run = "golangci-lint run --fix ./..."
+depends = ["lint:workspace", "build-golangci-lint"]
+run = "./bin/custom-gcl run --fix ./..."
+
+[tasks."lint:workspace"]
+description = "Validate workflow and shell scripts"
+run = """
+mise run lint:actionlint
+mise run lint:shell
+"""
+
+[tasks."lint:actionlint"]
+description = "Validate GitHub Actions workflows with actionlint"
+run = "actionlint"
+
+[tasks."lint:shell"]
+description = "Validate shell scripts with shellcheck"
+run = "find .github/scripts -type f -name '*.sh' -print0 | xargs -0 shellcheck"
 
 [tasks.setup-test-e2e]
 description = "Set up a Kind cluster for e2e tests if it does not exist"

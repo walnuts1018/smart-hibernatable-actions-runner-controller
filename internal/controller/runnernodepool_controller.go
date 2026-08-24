@@ -7,7 +7,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/events"
 	"k8s.io/client-go/util/retry"
@@ -53,35 +52,31 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	origNodePool := nodePool.DeepCopy()
+	nodePool.Status.ObservedGeneration = nodePool.Generation
 
 	// 1. 紐づくRunnerClusterを取得
 	var cluster ghav1alpha1.RunnerCluster
 	if err := r.Get(ctx, client.ObjectKey{Namespace: nodePool.Namespace, Name: nodePool.Spec.ClusterRef.Name}, &cluster); err != nil {
 		log.Error(err, "failed to get cluster for nodepool", "cluster", nodePool.Spec.ClusterRef.Name)
-		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, fmt.Sprintf("Cluster %s not found: %v", nodePool.Spec.ClusterRef.Name, err))
+		conditions.SetConditionWithGeneration(&nodePool.Status.Conditions, nodePool.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, fmt.Sprintf("Cluster %s not found: %v", nodePool.Spec.ClusterRef.Name, err))
 		if updateErr := r.updateStatus(ctx, &nodePool, origNodePool); updateErr != nil {
 			log.Error(updateErr, "failed to update status")
 		}
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
-	// 2. MachineSelectorに合致するRunnerMachine一覧を取得
-	selector, err := metav1.LabelSelectorAsSelector(&nodePool.Spec.MachineSelector)
-	if err != nil {
-		log.Error(err, "invalid machine selector")
-		if updateErr := r.updateStatus(ctx, &nodePool, origNodePool); updateErr != nil {
-			log.Error(updateErr, "failed to update status")
-		}
-		return ctrl.Result{}, err
-	}
-
+	// 2. このNodePoolに所属するRunnerMachine一覧を取得 (nodePoolRef.Name)
 	var machineList ghav1alpha1.RunnerMachineList
-	if err := r.List(ctx, &machineList, client.InNamespace(nodePool.Namespace), client.MatchingLabelsSelector{Selector: selector}); err != nil {
-		log.Error(err, "failed to list runner machines for nodepool")
-		if updateErr := r.updateStatus(ctx, &nodePool, origNodePool); updateErr != nil {
-			log.Error(updateErr, "failed to update status")
+	if err := r.List(ctx, &machineList, client.InNamespace(nodePool.Namespace), client.MatchingFields{
+		IndexMachineNodePoolRefName: nodePool.Name,
+	}); err != nil {
+		if err := r.List(ctx, &machineList, client.InNamespace(nodePool.Namespace)); err != nil {
+			log.Error(err, "failed to list runner machines for nodepool")
+			if updateErr := r.updateStatus(ctx, &nodePool, origNodePool); updateErr != nil {
+				log.Error(updateErr, "failed to update status")
+			}
+			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, err
 	}
 
 	// 3. このNodePoolを参照するRunnerScaleSet一覧を取得し、需要を集約
@@ -106,10 +101,11 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			}
 		}
 	}
-	machineCapacities, poweredOnCount, readyNodesCount, readyCapacity := r.collectMachineCapacities(machineList.Items, prevDesiredMap, activeRunnersByNode)
+	machineCapacities, poweredOnCount, readyNodesCount, potentialCapacity, readyCapacity := r.collectMachineCapacities(&cluster, machineList.Items, prevDesiredMap, activeRunnersByNode)
 
 	nodePool.Status.PoweredOnNodes = poweredOnCount
 	nodePool.Status.ReadyNodes = readyNodesCount
+	nodePool.Status.PotentialRunnerCapacity = potentialCapacity
 	nodePool.Status.ReadyRunnerCapacity = readyCapacity
 
 	// 5. CapacityPlannerで計画を計算
@@ -118,19 +114,19 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if r.Recorder != nil {
 			r.Recorder.Eventf(&nodePool, nil, corev1.EventTypeWarning, "MultiNodeUnsupported", "Reconcile", "MultiNode capacity planning is not supported in v1")
 		}
-		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonMultiNodeUnsupported, "MultiNode is unsupported in v1")
+		conditions.SetConditionWithGeneration(&nodePool.Status.Conditions, nodePool.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonMultiNodeUnsupported, "MultiNode is unsupported in v1")
 		if updateErr := r.updateStatus(ctx, &nodePool, origNodePool); updateErr != nil {
 			log.Error(updateErr, "failed to update status")
 		}
 		return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
 	}
 
-	if plan.BootstrapUnavailable {
+	if plan.StartupUnavailable {
 		if r.Recorder != nil {
-			r.Recorder.Eventf(&nodePool, nil, corev1.EventTypeWarning, "BootstrapUnavailable", "Reconcile", "Required bootstrap machine is quarantined or under maintenance")
+			r.Recorder.Eventf(&nodePool, nil, corev1.EventTypeWarning, "StartupUnavailable", "Reconcile", "Required startup machine is quarantined or under maintenance")
 		}
-		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonBootstrapUnavailable, "Required bootstrap machine is quarantined or under maintenance")
-		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeCapacityReady, metav1.ConditionFalse, conditions.ReasonBootstrapUnavailable, "Cluster prerequisite unavailable")
+		conditions.SetConditionWithGeneration(&nodePool.Status.Conditions, nodePool.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonStartupUnavailable, "Required startup machine is quarantined or under maintenance")
+		conditions.SetConditionWithGeneration(&nodePool.Status.Conditions, nodePool.Generation, conditions.TypeCapacityReady, metav1.ConditionFalse, conditions.ReasonStartupUnavailable, "Cluster prerequisite unavailable")
 		if updateErr := r.updateStatus(ctx, &nodePool, origNodePool); updateErr != nil {
 			log.Error(updateErr, "failed to update status")
 		}
@@ -142,19 +138,18 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// 6. DesiredMachines計画をStatusに反映
 	r.updateDesiredMachinesPlan(&nodePool, plan, machineList.Items, totalRequiredCapacity)
 
-	// 7. 各ScaleSetのEffectiveMaxRunnersをFair-share配分
-	maxAssignableCapacity := max(readyCapacity, int32(plan.TotalCapacity))
-	r.syncScaleSetAllocations(ctx, referencingScaleSets, allocInputs, maxAssignableCapacity)
+	// 7. 各ScaleSetのEffectiveMaxRunnersをFair-share配分 (潜在可能容量 potentialCapacity を基準に配分してコールドスタートを可能にする)
+	r.syncScaleSetAllocations(ctx, referencingScaleSets, allocInputs, potentialCapacity)
 
 	// 8. Status condition更新
 	if nodePool.Status.ReadyNodes >= nodePool.Status.DesiredNodes && nodePool.Status.DesiredNodes > 0 {
-		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeReady, metav1.ConditionTrue, conditions.ReasonReady, "NodePool is ready")
-		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeCapacityReady, metav1.ConditionTrue, conditions.ReasonCapacitySufficient, "Sufficient runner capacity available")
+		conditions.SetConditionWithGeneration(&nodePool.Status.Conditions, nodePool.Generation, conditions.TypeReady, metav1.ConditionTrue, conditions.ReasonReady, "NodePool is ready")
+		conditions.SetConditionWithGeneration(&nodePool.Status.Conditions, nodePool.Generation, conditions.TypeCapacityReady, metav1.ConditionTrue, conditions.ReasonCapacitySufficient, "Sufficient runner capacity available")
 	} else if totalRequiredCapacity == 0 {
-		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeReady, metav1.ConditionTrue, conditions.ReasonIdle, "NodePool is idle with zero demand")
+		conditions.SetConditionWithGeneration(&nodePool.Status.Conditions, nodePool.Generation, conditions.TypeReady, metav1.ConditionTrue, conditions.ReasonIdle, "NodePool is idle with zero demand")
 	} else {
-		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, "Machines are powering on or waiting for node readiness")
-		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeCapacityReady, metav1.ConditionFalse, conditions.ReasonCapacityExceeded, "Waiting for runner capacity")
+		conditions.SetConditionWithGeneration(&nodePool.Status.Conditions, nodePool.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, "Machines are powering on or waiting for node readiness")
+		conditions.SetConditionWithGeneration(&nodePool.Status.Conditions, nodePool.Generation, conditions.TypeCapacityReady, metav1.ConditionFalse, conditions.ReasonCapacityExceeded, "Waiting for runner capacity")
 	}
 
 	// Status patch
@@ -256,29 +251,47 @@ func (r *RunnerNodePoolReconciler) aggregateDemand(ctx context.Context, nodePool
 			}
 		}
 
-		required := max(nonTerminalCount, ss.Status.DesiredRunners)
+		// ERSet から desired replicas を集約
+		desiredRunners := int32(0)
+		var ersList ghav1alpha1.EphemeralRunnerSetList
+		if err := r.List(ctx, &ersList, client.InNamespace(ss.Namespace), client.MatchingFields{
+			IndexScaleSetRefName: ss.Name,
+		}); err == nil {
+			for _, ers := range ersList.Items {
+				if ers.Spec.ScaleSetRef.Name == ss.Name && ers.Spec.Replicas != nil {
+					desiredRunners += *ers.Spec.Replicas
+				}
+			}
+		}
+
+		required := max(nonTerminalCount, desiredRunners)
 		totalRequiredCapacity += required
+
+		maxLimit := int32(0)
+		if ss.Spec.Scaling.MaxRunners != nil {
+			maxLimit = *ss.Spec.Scaling.MaxRunners
+		}
 
 		allocInputs = append(allocInputs, capacity.ScaleSetAllocationInput{
 			Name:          ss.Name,
 			HardCommitted: nonTerminalCount,
-			Max:           ss.Spec.Scaling.MaxRunners,
+			Max:           maxLimit,
 		})
 	}
 
 	return referencingScaleSets, allocInputs, activeRunnersByNode, totalRequiredCapacity, nil
 }
 
-func (r *RunnerNodePoolReconciler) syncScaleSetAllocations(ctx context.Context, scaleSets []*ghav1alpha1.RunnerScaleSet, allocInputs []capacity.ScaleSetAllocationInput, totalCapacity int32) {
+func (r *RunnerNodePoolReconciler) syncScaleSetAllocations(ctx context.Context, scaleSets []*ghav1alpha1.RunnerScaleSet, allocInputs []capacity.ScaleSetAllocationInput, potentialCapacity int32) {
 	log := logf.FromContext(ctx)
-	allocations := capacity.AllocateScaleSetCapacity(totalCapacity, allocInputs)
+	allocations := capacity.AllocateScaleSetCapacity(potentialCapacity, allocInputs)
 	for _, ss := range scaleSets {
 		allocated, ok := allocations[ss.Name]
 		if !ok {
 			continue
 		}
 		if ss.Status.EffectiveMaxRunners != allocated {
-			log.Info("updating EffectiveMaxRunners for RunnerScaleSet", "scaleSet", ss.Name, "oldMax", ss.Status.EffectiveMaxRunners, "newMax", allocated)
+			log.Info("updating EffectiveMaxRunners for RunnerScaleSet based on potential capacity", "scaleSet", ss.Name, "oldMax", ss.Status.EffectiveMaxRunners, "newMax", allocated)
 			_ = retry.RetryOnConflict(retry.DefaultRetry, func() error {
 				var current ghav1alpha1.RunnerScaleSet
 				if err := r.Get(ctx, client.ObjectKeyFromObject(ss), &current); err != nil {
@@ -293,13 +306,21 @@ func (r *RunnerNodePoolReconciler) syncScaleSetAllocations(ctx context.Context, 
 	}
 }
 
-func (r *RunnerNodePoolReconciler) collectMachineCapacities(machines []ghav1alpha1.RunnerMachine, prevDesiredMap map[string]bool, activeRunnersByNode map[string]int) ([]capacity.MachineCapacity, int32, int32, int32) {
+func (r *RunnerNodePoolReconciler) collectMachineCapacities(cluster *ghav1alpha1.RunnerCluster, machines []ghav1alpha1.RunnerMachine, prevDesiredMap map[string]bool, activeRunnersByNode map[string]int) ([]capacity.MachineCapacity, int32, int32, int32, int32) {
 	machineCapacities := make([]capacity.MachineCapacity, 0, len(machines))
 	var (
-		poweredOnCount  int32
-		readyNodesCount int32
-		readyCapacity   int32
+		poweredOnCount    int32
+		readyNodesCount   int32
+		potentialCapacity int32
+		readyCapacity     int32
 	)
+
+	startupMap := make(map[string]bool)
+	if cluster != nil && cluster.Spec.Startup != nil {
+		for _, sRef := range cluster.Spec.Startup.MachineRefs {
+			startupMap[sRef.Name] = true
+		}
+	}
 
 	for i := range machines {
 		m := &machines[i]
@@ -307,22 +328,29 @@ func (r *RunnerNodePoolReconciler) collectMachineCapacities(machines []ghav1alph
 		isReady := m.Status.Kubernetes.Ready && isPoweredOn
 		isQuarantined := m.Status.Quarantine != nil
 		isMaintenance := m.Spec.Maintenance != nil && m.Spec.Maintenance.Enabled
+		isAlwaysOn := m.Spec.PowerPolicy == ghav1alpha1.RunnerMachinePowerPolicyAlwaysOn
+		isStartup := startupMap[m.Name]
 		wasDesired := prevDesiredMap[m.Name] || (m.UID != "" && prevDesiredMap[string(m.UID)])
-		activeCount := activeRunnersByNode[m.Spec.KubernetesNodeName]
+		activeCount := activeRunnersByNode[m.Spec.NodeName]
+
+		if !isQuarantined && !isMaintenance {
+			potentialCapacity += m.Spec.Capacity.RunnerSlots
+		}
 
 		if isPoweredOn && !isQuarantined && !isMaintenance {
 			poweredOnCount++
 		}
 		if isReady && !isQuarantined && !isMaintenance {
 			readyNodesCount++
-			readyCapacity += m.Spec.Capacity.Runners
+			readyCapacity += m.Spec.Capacity.RunnerSlots
 		}
 
 		machineCapacities = append(machineCapacities, capacity.MachineCapacity{
 			Machine:           m,
-			Capacity:          int(m.Spec.Capacity.Runners),
+			Capacity:          int(m.Spec.Capacity.RunnerSlots),
 			Priority:          m.Spec.Priority,
-			Bootstrap:         m.Spec.Bootstrap,
+			StartupRequired:   isStartup,
+			AlwaysOn:          isAlwaysOn,
 			PoweredOn:         isPoweredOn,
 			Ready:             m.Status.Kubernetes.Ready,
 			PowerManageable:   true,
@@ -333,7 +361,7 @@ func (r *RunnerNodePoolReconciler) collectMachineCapacities(machines []ghav1alph
 		})
 	}
 
-	return machineCapacities, poweredOnCount, readyNodesCount, readyCapacity
+	return machineCapacities, poweredOnCount, readyNodesCount, potentialCapacity, readyCapacity
 }
 
 func (r *RunnerNodePoolReconciler) updateDesiredMachinesPlan(
@@ -347,7 +375,7 @@ func (r *RunnerNodePoolReconciler) updateDesiredMachinesPlan(
 	// 全体需要のアイドルタイマー更新
 	if totalRequiredCapacity > 0 {
 		nodePool.Status.IdleSince = nil
-		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeIdle, metav1.ConditionFalse, conditions.ReasonActive, "Runner demand is active")
+		conditions.SetConditionWithGeneration(&nodePool.Status.Conditions, nodePool.Generation, conditions.TypeIdle, metav1.ConditionFalse, conditions.ReasonActive, "Runner demand is active")
 	} else {
 		if nodePool.Status.IdleSince == nil {
 			nowTime := metav1.Now()
@@ -355,7 +383,7 @@ func (r *RunnerNodePoolReconciler) updateDesiredMachinesPlan(
 			if r.Recorder != nil {
 				r.Recorder.Eventf(nodePool, nil, corev1.EventTypeNormal, "IdleTimerStarted", "Reconcile", "Runner demand dropped to zero, idle timer started")
 			}
-			conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeIdle, metav1.ConditionTrue, conditions.ReasonIdle, "No runner demand, idle timer started")
+			conditions.SetConditionWithGeneration(&nodePool.Status.Conditions, nodePool.Generation, conditions.TypeIdle, metav1.ConditionTrue, conditions.ReasonIdle, "No runner demand, idle timer started")
 		}
 	}
 
@@ -416,26 +444,16 @@ func isRunnerNonTerminal(phase ghav1alpha1.EphemeralRunnerPhase) bool {
 
 func (r *RunnerNodePoolReconciler) findNodePoolsForMachine(ctx context.Context, obj client.Object) []ctrl.Request {
 	m, ok := obj.(*ghav1alpha1.RunnerMachine)
-	if !ok {
+	if !ok || m.Spec.NodePoolRef == nil || m.Spec.NodePoolRef.Name == "" {
 		return nil
 	}
 
-	var pools ghav1alpha1.RunnerNodePoolList
-	if err := r.List(ctx, &pools, client.InNamespace(m.Namespace)); err != nil {
-		return nil
+	return []ctrl.Request{
+		{
+			Namespace: m.Namespace,
+			Name:      m.Spec.NodePoolRef.Name,
+		},
 	}
-
-	var requests []ctrl.Request
-	for _, p := range pools.Items {
-		selector, err := metav1.LabelSelectorAsSelector(&p.Spec.MachineSelector)
-		if err == nil && selector.Matches(labels.Set(m.Labels)) {
-			requests = append(requests, ctrl.Request{
-				Namespace: p.Namespace,
-				Name:      p.Name,
-			})
-		}
-	}
-	return requests
 }
 
 func (r *RunnerNodePoolReconciler) findNodePoolsForScaleSet(ctx context.Context, obj client.Object) []ctrl.Request {

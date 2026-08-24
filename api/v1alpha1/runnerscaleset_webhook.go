@@ -47,7 +47,6 @@ var _ admission.Defaulter[*RunnerScaleSet] = &RunnerScaleSet{}
 const (
 	defaultRunnerGroup   = "default"
 	defaultContainerName = "runner"
-	defaultWorkDir       = "_work"
 )
 
 // Default implements admission.Defaulter so a webhook will be registered for the type
@@ -59,15 +58,6 @@ func (r *RunnerScaleSet) Default(_ context.Context, obj *RunnerScaleSet) error {
 	}
 	if obj.Spec.Scaling.MinRunners < 0 {
 		obj.Spec.Scaling.MinRunners = 0
-	}
-	if obj.Spec.Scaling.MaxRunners <= 0 {
-		obj.Spec.Scaling.MaxRunners = 2
-	}
-	if obj.Spec.Runner.ContainerName == "" {
-		obj.Spec.Runner.ContainerName = defaultContainerName
-	}
-	if obj.Spec.Runner.WorkDir == "" {
-		obj.Spec.Runner.WorkDir = defaultWorkDir
 	}
 	return nil
 }
@@ -204,20 +194,22 @@ func (r *RunnerScaleSet) validateScalingSpec(allErrs *field.ErrorList) {
 		))
 	}
 
-	if r.Spec.Scaling.MaxRunners < 1 {
-		*allErrs = append(*allErrs, field.Invalid(
-			field.NewPath("spec", "scaling", "maxRunners"),
-			r.Spec.Scaling.MaxRunners,
-			"maxRunners must be greater than or equal to 1",
-		))
-	}
+	if r.Spec.Scaling.MaxRunners != nil {
+		if *r.Spec.Scaling.MaxRunners < 1 {
+			*allErrs = append(*allErrs, field.Invalid(
+				field.NewPath("spec", "scaling", "maxRunners"),
+				*r.Spec.Scaling.MaxRunners,
+				"maxRunners must be greater than or equal to 1",
+			))
+		}
 
-	if r.Spec.Scaling.MinRunners > r.Spec.Scaling.MaxRunners {
-		*allErrs = append(*allErrs, field.Invalid(
-			field.NewPath("spec", "scaling", "minRunners"),
-			r.Spec.Scaling.MinRunners,
-			"minRunners must be less than or equal to maxRunners",
-		))
+		if r.Spec.Scaling.MinRunners > *r.Spec.Scaling.MaxRunners {
+			*allErrs = append(*allErrs, field.Invalid(
+				field.NewPath("spec", "scaling", "minRunners"),
+				r.Spec.Scaling.MinRunners,
+				"minRunners must be less than or equal to maxRunners",
+			))
+		}
 	}
 }
 
@@ -231,15 +223,7 @@ func (r *RunnerScaleSet) validateRunnerTemplateSpec(allErrs *field.ErrorList) {
 		return
 	}
 
-	targetName := r.Spec.Runner.ContainerName
-	if targetName == "" {
-		targetName = "runner"
-	}
-	found := false
 	for ci, c := range containers {
-		if c.Name == targetName {
-			found = true
-		}
 		for ei, ev := range c.Env {
 			if ev.Name == "ACTIONS_RUNNER_INPUT_JITCONFIG" {
 				*allErrs = append(*allErrs, field.Forbidden(
@@ -248,13 +232,6 @@ func (r *RunnerScaleSet) validateRunnerTemplateSpec(allErrs *field.ErrorList) {
 				))
 			}
 		}
-	}
-	if !found {
-		*allErrs = append(*allErrs, field.Invalid(
-			field.NewPath("spec", "runner", "containerName"),
-			r.Spec.Runner.ContainerName,
-			fmt.Sprintf("container %q not found in pod template containers", targetName),
-		))
 	}
 }
 

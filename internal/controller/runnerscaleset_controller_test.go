@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"testing"
-	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -12,7 +11,6 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/runner"
@@ -36,22 +34,13 @@ func TestRunnerScaleSetReconciler(t *testing.T) {
 	nodePool := &ghav1alpha1.RunnerNodePool{
 		Name:      "pool1",
 		Namespace: "default",
-		Spec: ghav1alpha1.RunnerNodePoolSpec{
-			MachineSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{"pool": "pool1"},
-			},
+		Status: ghav1alpha1.RunnerNodePoolStatus{
+			PotentialRunnerCapacity: 4,
+			ReadyRunnerCapacity:     4,
 		},
 	}
 
-	machine := &ghav1alpha1.RunnerMachine{
-		Name:      "m1",
-		Namespace: "default",
-		Labels:    map[string]string{"pool": "pool1"},
-		Spec: ghav1alpha1.RunnerMachineSpec{
-			Capacity: ghav1alpha1.RunnerMachineCapacity{Runners: 4},
-		},
-	}
-
+	two := int32(2)
 	scaleSet := &ghav1alpha1.RunnerScaleSet{
 		Name:       "test-ss",
 		Namespace:  "default",
@@ -65,7 +54,7 @@ func TestRunnerScaleSetReconciler(t *testing.T) {
 			NodePoolRef: corev1.LocalObjectReference{Name: "pool1"},
 			Scaling: ghav1alpha1.RunnerScaleSetScalingSpec{
 				MinRunners: 0,
-				MaxRunners: 2,
+				MaxRunners: &two,
 			},
 			Runner: ghav1alpha1.RunnerTemplateSpec{
 				Template: corev1.PodTemplateSpec{
@@ -77,12 +66,12 @@ func TestRunnerScaleSetReconciler(t *testing.T) {
 				},
 			},
 		},
-		Status: ghav1alpha1.RunnerScaleSetStatus{
-			DesiredRunners: 2,
-		},
 	}
 
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret, nodePool, machine, scaleSet).WithStatusSubresource(scaleSet).Build()
+	fakeClient := setupFakeClientBuilder(scheme).
+		WithObjects(secret, nodePool, scaleSet).
+		WithStatusSubresource(scaleSet, nodePool).
+		Build()
 
 	r := &RunnerScaleSetReconciler{
 		Client: fakeClient,
@@ -124,30 +113,28 @@ func TestRunnerScaleSetReconciler(t *testing.T) {
 		t.Fatal("expected liveness and readiness probes to be configured")
 	}
 
-	// ServiceAccount, Role, RoleBinding, Leaseが作成されているか確認
+	// ServiceAccountが作成されているか確認
 	var sa corev1.ServiceAccount
 	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-ss-listener"}, &sa); err != nil {
 		t.Fatalf("expected listener service account to exist: %v", err)
 	}
 
-	// EphemeralRunnerが2つ作成されているか確認
-	var runners ghav1alpha1.EphemeralRunnerList
-	if err := fakeClient.List(context.Background(), &runners, client.InNamespace("default")); err != nil {
-		t.Fatalf("failed to list runners: %v", err)
+	// EphemeralRunnerSetが作成されているか確認
+	var ers ghav1alpha1.EphemeralRunnerSet
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-ss"}, &ers); err != nil {
+		t.Fatalf("expected EphemeralRunnerSet to exist: %v", err)
 	}
-
-	if len(runners.Items) != 2 {
-		t.Fatalf("expected 2 EphemeralRunners, got %d", len(runners.Items))
+	if ers.Spec.ScaleSetRef.Name != "test-ss" {
+		t.Fatalf("expected scaleSetRef.name to be test-ss, got %s", ers.Spec.ScaleSetRef.Name)
 	}
 }
 
-func TestRunnerScaleSetReconciler_DeletionWithSecretMissingAndOrphanOverride(t *testing.T) {
+func TestRunnerScaleSetReconciler_Deletion(t *testing.T) {
 	scheme := runtime.NewScheme()
 	clientgoscheme.AddToScheme(scheme)
 	ghav1alpha1.AddToScheme(scheme)
 
 	now := metav1.Now()
-	// Case 1: Secretが欠落しており、orphan overrideがない場合 -> Finalizerは維持されて削除ブロック
 	scaleSet := &ghav1alpha1.RunnerScaleSet{
 		Name:              "test-ss",
 		Namespace:         "default",
@@ -166,7 +153,10 @@ func TestRunnerScaleSetReconciler_DeletionWithSecretMissingAndOrphanOverride(t *
 		},
 	}
 
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(scaleSet).WithStatusSubresource(scaleSet).Build()
+	fakeClient := setupFakeClientBuilder(scheme).
+		WithObjects(scaleSet).
+		WithStatusSubresource(scaleSet).
+		Build()
 
 	r := &RunnerScaleSetReconciler{
 		Client: fakeClient,
@@ -176,39 +166,16 @@ func TestRunnerScaleSetReconciler_DeletionWithSecretMissingAndOrphanOverride(t *
 		},
 	}
 
-	res, err := r.Reconcile(context.Background(), ctrl.Request{
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
 		Namespace: "default", Name: "test-ss",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error during deletion reconciliation: %v", err)
 	}
-	if res.RequeueAfter != 30*time.Second {
-		t.Errorf("expected 30s requeue when secret is missing, got %v", res.RequeueAfter)
-	}
 
 	var updated ghav1alpha1.RunnerScaleSet
-	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-ss"}, &updated); err != nil {
-		t.Fatalf("failed to get scale set: %v", err)
-	}
-	if len(updated.Finalizers) == 0 {
-		t.Errorf("expected finalizers to be retained when secret is missing without orphan override")
-	}
-
-	// Case 2: orphan-github-resource アノテーションが付与された場合 -> Finalizerが解除される
-	updated.Annotations = map[string]string{
-		runner.AnnotationOrphanGitHubResource: "true",
-	}
-	fakeClient.Update(context.Background(), &updated)
-
-	_, err = r.Reconcile(context.Background(), ctrl.Request{
-		Namespace: "default", Name: "test-ss",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
 	err = fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-ss"}, &updated)
 	if err == nil && len(updated.Finalizers) != 0 {
-		t.Errorf("expected finalizer to be removed with orphan override, got %v", updated.Finalizers)
+		t.Errorf("expected finalizers to be removed, got %v", updated.Finalizers)
 	}
 }

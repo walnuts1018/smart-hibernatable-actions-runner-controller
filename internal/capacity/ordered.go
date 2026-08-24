@@ -29,58 +29,60 @@ func (p *orderedCapacityPlanner) Plan(machines []MachineCapacity, requiredRunner
 		}
 	}
 
-	if requiredRunners <= 0 {
-		// Scale to zero: no machines required
-		return Plan{
-			SelectedMachines:  []*ghav1alpha1.RunnerMachine{},
-			TotalCapacity:     0,
-			BootstrapRequired: false,
-		}
-	}
-
 	var (
-		selected             []*ghav1alpha1.RunnerMachine
-		totalCapacity        int
-		hasBootstrap         bool
-		bootstrapUnavailable bool
-		candidates           []MachineCapacity
+		selected           []*ghav1alpha1.RunnerMachine
+		totalCapacity      int
+		hasStartup         bool
+		startupUnavailable bool
+		candidates         []MachineCapacity
 	)
 
-	// Phase 1: インフラ前提条件（Bootstrapマシン）を最優先で選択
+	// Phase 1: AlwaysOn または StartupRequired マシンを優先選択
 	for _, mc := range machines {
 		if mc.Quarantined || mc.Maintenance {
-			if mc.Bootstrap {
-				bootstrapUnavailable = true
+			if mc.StartupRequired {
+				startupUnavailable = true
 			}
 			continue
 		}
 
-		if mc.Bootstrap {
+		if mc.AlwaysOn || mc.StartupRequired {
 			selected = append(selected, mc.Machine)
 			totalCapacity += mc.Capacity
-			hasBootstrap = true
+			if mc.StartupRequired {
+				hasStartup = true
+			}
 		} else {
 			candidates = append(candidates, mc)
 		}
 	}
 
-	if bootstrapUnavailable && !hasBootstrap {
+	if startupUnavailable && !hasStartup {
 		return Plan{
-			BootstrapUnavailable: true,
+			StartupUnavailable: true,
+		}
+	}
+
+	if requiredRunners <= 0 {
+		// Scale to zero: only AlwaysOn / StartupRequired machines remain
+		return Plan{
+			SelectedMachines: selected,
+			TotalCapacity:    totalCapacity,
+			StartupRequired:  hasStartup,
 		}
 	}
 
 	// 既に前提条件のみで必要容量を満たしている場合はそのまま返す
 	if totalCapacity >= requiredRunners {
 		return Plan{
-			SelectedMachines:     selected,
-			TotalCapacity:        totalCapacity,
-			BootstrapRequired:    hasBootstrap,
-			BootstrapUnavailable: bootstrapUnavailable,
+			SelectedMachines:   selected,
+			TotalCapacity:      totalCapacity,
+			StartupRequired:    hasStartup,
+			StartupUnavailable: startupUnavailable,
 		}
 	}
 
-	// Phase 2: 残りのマシンを（PreviouslyDesired -> ActiveRunners降順 -> Ready -> PoweredOn -> Priority昇順 -> Name昇順）でソート
+	// Phase 2: 残りのマシンを（PreviouslyDesired -> ActiveRunners降順 -> Ready -> PoweredOn -> Priority降順 -> Name昇順）でソート
 	sort.SliceStable(candidates, func(i, j int) bool {
 		// 0. 前回選択されていたマシンへの Stickiness 優先 (フラッピング・不要な cold start 防止)
 		if candidates[i].PreviouslyDesired != candidates[j].PreviouslyDesired {
@@ -98,9 +100,9 @@ func (p *orderedCapacityPlanner) Plan(machines []MachineCapacity, requiredRunner
 		if candidates[i].PoweredOn != candidates[j].PoweredOn {
 			return candidates[i].PoweredOn
 		}
-		// 4. Priority昇順 (小さい値ほど高優先)
+		// 4. Priority降順 (大きい値ほど高優先)
 		if candidates[i].Priority != candidates[j].Priority {
-			return candidates[i].Priority < candidates[j].Priority
+			return candidates[i].Priority > candidates[j].Priority
 		}
 		// 5. 名前昇順で安定化
 		return candidates[i].Machine.Name < candidates[j].Machine.Name
@@ -116,8 +118,8 @@ func (p *orderedCapacityPlanner) Plan(machines []MachineCapacity, requiredRunner
 	}
 
 	return Plan{
-		SelectedMachines:  selected,
-		TotalCapacity:     totalCapacity,
-		BootstrapRequired: hasBootstrap,
+		SelectedMachines: selected,
+		TotalCapacity:    totalCapacity,
+		StartupRequired:  hasStartup,
 	}
 }

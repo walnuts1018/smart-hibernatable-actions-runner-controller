@@ -48,28 +48,34 @@ type RunnerClusterReadinessSpec struct {
 	NodeReadyTimeout *metav1.Duration `json:"nodeReadyTimeout,omitempty"`
 }
 
+// RunnerClusterStartupSpec defines machines required to bootstrap/start the remote cluster.
+type RunnerClusterStartupSpec struct {
+	// MachineRefs lists the RunnerMachines required to bring up the remote cluster control plane / API.
+	// +optional
+	MachineRefs []corev1.LocalObjectReference `json:"machineRefs,omitempty"`
+}
+
 // RunnerClusterIdentitySpec defines identity binding expectations for cluster re-provisioning and adoption.
 type RunnerClusterIdentitySpec struct {
-	// ExpectedUID is the new kube-system namespace UID expected when re-adopting a re-provisioned cluster.
+	// ExpectedClusterUID is the new kube-system namespace UID expected when adopting a re-provisioned cluster.
 	// +optional
-	ExpectedUID string `json:"expectedUID,omitempty"`
-
-	// AdoptionGeneration is an incrementing counter to trigger adoption of ExpectedUID.
-	// +optional
-	AdoptionGeneration int64 `json:"adoptionGeneration,omitempty"`
+	ExpectedClusterUID string `json:"expectedClusterUID,omitempty"`
 }
 
 // RunnerClusterSpec defines the desired state of RunnerCluster.
 type RunnerClusterSpec struct {
 	// KubeconfigSecretRef references the Secret containing the kubeconfig to connect to the runner Kubernetes cluster.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="kubeconfigSecretRef is immutable"
 	KubeconfigSecretRef corev1.SecretKeySelector `json:"kubeconfigSecretRef"`
 
 	// RunnerNamespace is the namespace on the runner cluster where runner Pods and Secrets are created.
 	// +kubebuilder:default="gha-runners"
 	// +optional
 	RunnerNamespace string `json:"runnerNamespace,omitempty"`
+
+	// Startup defines machines that must be powered on to start the remote cluster API.
+	// +optional
+	Startup *RunnerClusterStartupSpec `json:"startup,omitempty"`
 
 	// Readiness defines timeouts and parameters for checking cluster readiness.
 	// +optional
@@ -82,6 +88,10 @@ type RunnerClusterSpec struct {
 
 // RunnerClusterStatus defines the observed state of RunnerCluster.
 type RunnerClusterStatus struct {
+	// ObservedGeneration is the most recent generation observed for this resource.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// Phase is the current high-level state of the runner cluster.
 	// +kubebuilder:default="Unknown"
 	// +optional
@@ -94,10 +104,6 @@ type RunnerClusterStatus struct {
 	// ClusterUID is the unique identifier (kube-system namespace UID) of the remote cluster for split-brain protection.
 	// +optional
 	ClusterUID string `json:"clusterUID,omitempty"`
-
-	// ObservedAdoptionGeneration records the last successfully processed AdoptionGeneration.
-	// +optional
-	ObservedAdoptionGeneration int64 `json:"observedAdoptionGeneration,omitempty"`
 
 	// Conditions store the detailed status conditions of the runner cluster.
 	// +listType=map
@@ -115,19 +121,11 @@ type RunnerClusterStatus struct {
 
 // RunnerCluster is the Schema for the runnerclusters API
 type RunnerCluster struct {
-	metav1.TypeMeta `json:",inline"`
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// metadata is a standard object metadata
-	// +optional
-	metav1.ObjectMeta `json:"metadata,omitzero"`
-
-	// spec defines the desired state of RunnerCluster
-	// +required
-	Spec RunnerClusterSpec `json:"spec"`
-
-	// status defines the observed state of RunnerCluster
-	// +optional
-	Status RunnerClusterStatus `json:"status,omitzero"`
+	Spec   RunnerClusterSpec   `json:"spec,omitempty"`
+	Status RunnerClusterStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -135,7 +133,7 @@ type RunnerCluster struct {
 // RunnerClusterList contains a list of RunnerCluster
 type RunnerClusterList struct {
 	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitzero"`
+	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []RunnerCluster `json:"items"`
 }
 

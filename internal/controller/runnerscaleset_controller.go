@@ -2,11 +2,12 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
-	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -46,7 +47,9 @@ type RunnerScaleSetReconciler struct {
 // +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnerscalesets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnerscalesets/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnerscalesets/finalizers,verbs=update
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=ephemeralrunners,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=ephemeralrunnersets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=ephemeralrunnersets/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=ephemeralrunners,verbs=get;list;watch
 // +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnernodepools,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
@@ -64,6 +67,7 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	origScaleSet := scaleSet.DeepCopy()
+	scaleSet.Status.ObservedGeneration = scaleSet.Generation
 
 	// 1. Finalizer処理 (削除時: Drain-first)
 	if !scaleSet.DeletionTimestamp.IsZero() {
@@ -88,7 +92,7 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	// 3. CapacityLimit の判定
+	// 3. CapacityLimit / EffectiveMaxRunners の計算
 	declaredCapacity, err := r.reconcileCapacity(ctx, &scaleSet)
 	if err != nil {
 		log.Error(err, "failed to reconcile capacity")
@@ -107,9 +111,9 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
-	// 5. EphemeralRunner リソースの Reconciliation
-	if err := r.reconcileRunners(ctx, &scaleSet, declaredCapacity); err != nil {
-		log.Error(err, "failed to reconcile ephemeral runners")
+	// 5. EphemeralRunnerSet リソースの同期
+	if err := r.reconcileEphemeralRunnerSet(ctx, &scaleSet, declaredCapacity); err != nil {
+		log.Error(err, "failed to reconcile ephemeral runner set")
 		if updateErr := r.updateStatus(ctx, &scaleSet, origScaleSet); updateErr != nil {
 			log.Error(updateErr, "failed to update status")
 		}
@@ -118,9 +122,9 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// 6. 全体 Ready Condition の更新
 	if scaleSet.Status.GitHub.AssignedJobs >= 0 && scaleSet.Status.Listener.Ready {
-		conditions.SetCondition(&scaleSet.Status.Conditions, conditions.TypeReady, metav1.ConditionTrue, conditions.ReasonReady, "ScaleSet is operational")
+		conditions.SetConditionWithGeneration(&scaleSet.Status.Conditions, scaleSet.Generation, conditions.TypeReady, metav1.ConditionTrue, conditions.ReasonReady, "ScaleSet is operational")
 	} else {
-		conditions.SetCondition(&scaleSet.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, "ScaleSet is initializing")
+		conditions.SetConditionWithGeneration(&scaleSet.Status.Conditions, scaleSet.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, "ScaleSet is initializing")
 	}
 
 	// 7. Status の更新
@@ -148,86 +152,80 @@ func (r *RunnerScaleSetReconciler) reconcileDeletion(
 	if scaleSet.Status.EffectiveMaxRunners != 0 {
 		scaleSet.Status.EffectiveMaxRunners = 0
 		if updateErr := r.updateStatus(ctx, scaleSet, origScaleSet); updateErr != nil {
-			log.Error(updateErr, "failed to update status")
+			return ctrl.Result{}, updateErr
 		}
 	}
 
-	// 1.2 子 EphemeralRunner の一覧取得
+	// 1.2 配下の EphemeralRunnerSet の replicas を 0 にスケールダウン
+	var ers ghav1alpha1.EphemeralRunnerSet
+	if err := r.Get(ctx, client.ObjectKey{Namespace: scaleSet.Namespace, Name: scaleSet.Name}, &ers); err == nil {
+		zero := int32(0)
+		if ers.Spec.Replicas == nil || *ers.Spec.Replicas != 0 {
+			origERS := ers.DeepCopy()
+			ers.Spec.Replicas = &zero
+			if err := r.Patch(ctx, &ers, client.MergeFrom(origERS)); err != nil {
+				log.Error(err, "failed to scale down EphemeralRunnerSet during deletion")
+			}
+		}
+	}
+
+	// 1.3 配下の非完了 EphemeralRunner をカウント
 	var runnerList ghav1alpha1.EphemeralRunnerList
-	if err := r.List(ctx, &runnerList, client.InNamespace(scaleSet.Namespace), client.MatchingLabels{
-		runner.LabelScaleSetUID: string(scaleSet.UID),
+	if err := r.List(ctx, &runnerList, client.InNamespace(scaleSet.Namespace), client.MatchingFields{
+		IndexScaleSetRefName: scaleSet.Name,
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	// 1.3 non-terminal な EphemeralRunner の残存確認 (Drain)
-	nonTerminalCount := 0
-	for i := range runnerList.Items {
-		if isRunnerNonTerminal(runnerList.Items[i].Status.Phase) {
-			nonTerminalCount++
+	activeCount := 0
+	for _, run := range runnerList.Items {
+		matches := false
+		if run.Labels[runner.LabelScaleSetUID] != "" {
+			matches = run.Labels[runner.LabelScaleSetUID] == string(scaleSet.UID)
+		} else {
+			matches = run.Spec.ScaleSetRef.Name == scaleSet.Name
+		}
+		if matches && isRunnerNonTerminal(run.Status.Phase) {
+			activeCount++
 		}
 	}
 
-	if nonTerminalCount > 0 {
-		log.Info("waiting for non-terminal child ephemeral runners to drain before removing scale set", "nonTerminalCount", nonTerminalCount)
+	if activeCount > 0 {
+		log.Info("waiting for in-flight runner jobs to complete before deleting RunnerScaleSet", "scaleSet", scaleSet.Name, "activeRunners", activeCount)
+		if r.Recorder != nil {
+			r.Recorder.Eventf(scaleSet, nil, corev1.EventTypeNormal, "DrainingRunners", "Delete", "Waiting for %d in-flight runner(s) to complete before cleanup", activeCount)
+		}
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	// 1.4 non-terminal が 0 になったら、TTL 保持中の terminal CR を即座に削除 (Cascade Cleanup)
-	for i := range runnerList.Items {
-		er := &runnerList.Items[i]
-		if !isRunnerNonTerminal(er.Status.Phase) {
-			if err := r.Delete(ctx, er); err != nil && !apierrors.IsNotFound(err) {
-				log.Error(err, "failed to delete terminal child ephemeral runner", "runner", er.Name)
-				return ctrl.Result{}, err
-			}
-		}
-	}
-
-	if len(runnerList.Items) > 0 {
-		log.Info("waiting for child ephemeral runner CRs to be deleted", "count", len(runnerList.Items))
-		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
-	}
-
-	// 1.5 Listener Deployment の停止/削除 (active session を閉じて 409 を防止)
+	// 1.4 Listener Deployment の削除
+	deployName := fmt.Sprintf("%s-listener", scaleSet.Name)
 	var deploy appsv1.Deployment
-	deployKey := client.ObjectKey{Namespace: scaleSet.Namespace, Name: fmt.Sprintf("%s-listener", scaleSet.Name)}
-	if err := r.Get(ctx, deployKey, &deploy); err == nil {
+	if err := r.Get(ctx, client.ObjectKey{Namespace: scaleSet.Namespace, Name: deployName}, &deploy); err == nil {
 		if err := r.Delete(ctx, &deploy); err != nil && !apierrors.IsNotFound(err) {
-			log.Error(err, "failed to delete listener deployment before scaleset cleanup")
-			return ctrl.Result{}, err
+			log.Error(err, "failed to delete listener deployment")
 		}
 	}
 
-	// 1.6 GitHub Actions ScaleSet 削除
-	orphanOverride := scaleSet.Annotations != nil && scaleSet.Annotations[runner.AnnotationOrphanGitHubResource] == "true"
-	if scaleSet.Status.ScaleSetID != 0 && !orphanOverride {
-		log.Info("deleting runner scale set from GitHub Actions", "scaleSetID", scaleSet.Status.ScaleSetID)
+	// 1.5 GitHub 側 ScaleSet の削除 (ScaleSetID が既知の場合)
+	if scaleSet.Status.ScaleSetID > 0 {
 		ghaClient, err := r.getGitHubClient(ctx, scaleSet)
-		if err != nil {
-			log.Error(err, "failed to get github client during scale set deletion; retention required unless orphan-github-resource override is set")
-			conditions.SetCondition(&scaleSet.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonGitHubAuthFailed, "Cannot delete GitHub ScaleSet: credentials missing")
-			if updateErr := r.updateStatus(ctx, scaleSet, origScaleSet); updateErr != nil {
-				log.Error(updateErr, "failed to update status")
+		if err == nil {
+			if err := ghaClient.DeleteScaleSet(ctx, scaleSet.Status.ScaleSetID); err != nil {
+				log.Error(err, "failed to delete RunnerScaleSet in GitHub Actions, proceeding with finalizer removal", "scaleSetID", scaleSet.Status.ScaleSetID)
+			} else {
+				log.Info("successfully deleted RunnerScaleSet in GitHub Actions", "scaleSetID", scaleSet.Status.ScaleSetID)
 			}
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-
-		if err := ghaClient.DeleteScaleSet(ctx, scaleSet.Status.ScaleSetID); err != nil {
-			log.Error(err, "failed to delete scale set in GitHub", "scaleSetID", scaleSet.Status.ScaleSetID)
-			conditions.SetCondition(&scaleSet.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonScaleSetFailed, fmt.Sprintf("Failed to delete scale set in GitHub: %v", err))
-			if updateErr := r.updateStatus(ctx, scaleSet, origScaleSet); updateErr != nil {
-				log.Error(updateErr, "failed to update status")
-			}
-			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 		}
 	}
 
+	// 1.6 Finalizer の削除
 	controllerutil.RemoveFinalizer(scaleSet, runner.FinalizerScaleSetCleanup)
 	if err := r.Update(ctx, scaleSet); err != nil {
 		return ctrl.Result{}, err
 	}
 
+	log.Info("successfully finalized and cleaned up RunnerScaleSet", "scaleSet", scaleSet.Name)
 	return ctrl.Result{}, nil
 }
 
@@ -238,13 +236,7 @@ func (r *RunnerScaleSetReconciler) updateStatus(ctx context.Context, ss, _ *ghav
 			return err
 		}
 		orig := current.DeepCopy()
-
-		// Manager の担当フィールドをマージ (Listener の DesiredRunners / GitHub / Listener ステータスを尊重)
-		current.Status.ScaleSetID = ss.Status.ScaleSetID
-		current.Status.EffectiveMaxRunners = ss.Status.EffectiveMaxRunners
-		current.Status.ActiveRunners = ss.Status.ActiveRunners
-		current.Status.Conditions = ss.Status.Conditions
-
+		current.Status = ss.Status
 		patch := client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{})
 		return r.Status().Patch(ctx, &current, patch)
 	})
@@ -256,8 +248,8 @@ func (r *RunnerScaleSetReconciler) reconcileGitHub(ctx context.Context, ss *ghav
 		if r.Recorder != nil {
 			r.Recorder.Eventf(ss, nil, corev1.EventTypeWarning, "GitHubAuthFailed", "Reconcile", "Failed to authenticate with GitHub App: %v", err)
 		}
-		conditions.SetCondition(&ss.Status.Conditions, conditions.TypeGitHubReady, metav1.ConditionFalse, conditions.ReasonGitHubAuthFailed, err.Error())
-		conditions.SetCondition(&ss.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, "GitHub client auth failed")
+		conditions.SetConditionWithGeneration(&ss.Status.Conditions, ss.Generation, conditions.TypeGitHubReady, metav1.ConditionFalse, conditions.ReasonGitHubAuthFailed, err.Error())
+		conditions.SetConditionWithGeneration(&ss.Status.Conditions, ss.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, "GitHub client auth failed")
 		return err
 	}
 
@@ -266,8 +258,8 @@ func (r *RunnerScaleSetReconciler) reconcileGitHub(ctx context.Context, ss *ghav
 		if r.Recorder != nil {
 			r.Recorder.Eventf(ss, nil, corev1.EventTypeWarning, "ScaleSetFailed", "Reconcile", "Failed to ensure scale set in GitHub: %v", err)
 		}
-		conditions.SetCondition(&ss.Status.Conditions, conditions.TypeGitHubReady, metav1.ConditionFalse, conditions.ReasonScaleSetFailed, err.Error())
-		conditions.SetCondition(&ss.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, "Failed to create scale set in GitHub")
+		conditions.SetConditionWithGeneration(&ss.Status.Conditions, ss.Generation, conditions.TypeGitHubReady, metav1.ConditionFalse, conditions.ReasonScaleSetFailed, err.Error())
+		conditions.SetConditionWithGeneration(&ss.Status.Conditions, ss.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, "Failed to create scale set in GitHub")
 		return err
 	}
 
@@ -277,7 +269,7 @@ func (r *RunnerScaleSetReconciler) reconcileGitHub(ctx context.Context, ss *ghav
 			r.Recorder.Eventf(ss, nil, corev1.EventTypeNormal, "ScaleSetRegistered", "Reconcile", "Registered RunnerScaleSet in GitHub Actions with ID %d", scaleSetID)
 		}
 	}
-	conditions.SetCondition(&ss.Status.Conditions, conditions.TypeGitHubReady, metav1.ConditionTrue, conditions.ReasonScaleSetCreated, "ScaleSet is registered in GitHub Actions")
+	conditions.SetConditionWithGeneration(&ss.Status.Conditions, ss.Generation, conditions.TypeGitHubReady, metav1.ConditionTrue, conditions.ReasonScaleSetCreated, "ScaleSet is registered in GitHub Actions")
 	return nil
 }
 
@@ -287,23 +279,32 @@ func (r *RunnerScaleSetReconciler) reconcileCapacity(ctx context.Context, ss *gh
 		if r.Recorder != nil {
 			r.Recorder.Eventf(ss, nil, corev1.EventTypeWarning, "NodePoolNotFound", "Reconcile", "Referenced NodePool %s not found: %v", ss.Spec.NodePoolRef.Name, err)
 		}
-		conditions.SetCondition(&ss.Status.Conditions, conditions.TypeCapacityReady, metav1.ConditionFalse, conditions.ReasonNotReady, fmt.Sprintf("NodePool %s not found", ss.Spec.NodePoolRef.Name))
+		conditions.SetConditionWithGeneration(&ss.Status.Conditions, ss.Generation, conditions.TypeCapacityReady, metav1.ConditionFalse, conditions.ReasonNotReady, fmt.Sprintf("NodePool %s not found", ss.Spec.NodePoolRef.Name))
 		return 0, err
 	}
 
-	conditions.SetCondition(&ss.Status.Conditions, conditions.TypeCapacityReady, metav1.ConditionTrue, conditions.ReasonCapacitySufficient, "NodePool found")
-	declaredCapacity := r.getNodePoolDeclaredCapacity(ctx, &nodePool)
+	conditions.SetConditionWithGeneration(&ss.Status.Conditions, ss.Generation, conditions.TypeCapacityReady, metav1.ConditionTrue, conditions.ReasonCapacitySufficient, "NodePool found")
+	potentialCapacity := nodePool.Status.PotentialRunnerCapacity
 
-	if ss.Spec.Scaling.MaxRunners > declaredCapacity {
+	effectiveMax := potentialCapacity
+	if ss.Spec.Scaling.MaxRunners != nil && *ss.Spec.Scaling.MaxRunners < effectiveMax {
+		effectiveMax = *ss.Spec.Scaling.MaxRunners
+	}
+	if ss.Spec.Suspend {
+		effectiveMax = 0
+	}
+	ss.Status.EffectiveMaxRunners = effectiveMax
+
+	if ss.Spec.Scaling.MaxRunners != nil && *ss.Spec.Scaling.MaxRunners > potentialCapacity {
 		if r.Recorder != nil {
-			r.Recorder.Eventf(ss, nil, corev1.EventTypeWarning, "CapacityExceeded", "Reconcile", "MaxRunners (%d) exceeds NodePool declared capacity (%d)", ss.Spec.Scaling.MaxRunners, declaredCapacity)
+			r.Recorder.Eventf(ss, nil, corev1.EventTypeWarning, "CapacityExceeded", "Reconcile", "MaxRunners (%d) exceeds NodePool potential capacity (%d)", *ss.Spec.Scaling.MaxRunners, potentialCapacity)
 		}
-		conditions.SetCondition(&ss.Status.Conditions, conditions.TypeCapacityLimited, metav1.ConditionTrue, conditions.ReasonCapacityExceeded, "MaxRunners exceeds NodePool declared capacity")
+		conditions.SetConditionWithGeneration(&ss.Status.Conditions, ss.Generation, conditions.TypeCapacityLimited, metav1.ConditionTrue, conditions.ReasonCapacityExceeded, "MaxRunners exceeds NodePool potential capacity")
 	} else {
-		conditions.SetCondition(&ss.Status.Conditions, conditions.TypeCapacityLimited, metav1.ConditionFalse, conditions.ReasonCapacitySufficient, "Capacity within limits")
+		conditions.SetConditionWithGeneration(&ss.Status.Conditions, ss.Generation, conditions.TypeCapacityLimited, metav1.ConditionFalse, conditions.ReasonCapacitySufficient, "Capacity within limits")
 	}
 
-	return declaredCapacity, nil
+	return potentialCapacity, nil
 }
 
 func (r *RunnerScaleSetReconciler) reconcileListener(ctx context.Context, ss *ghav1alpha1.RunnerScaleSet) error {
@@ -344,7 +345,7 @@ func (r *RunnerScaleSetReconciler) reconcileListener(ctx context.Context, ss *gh
 		return fmt.Errorf("failed to reconcile listener deployment: %w", err)
 	}
 
-	conditions.SetCondition(&ss.Status.Conditions, conditions.TypeListenerReady, metav1.ConditionTrue, conditions.ReasonListenerRunning, "Listener deployment is running")
+	conditions.SetConditionWithGeneration(&ss.Status.Conditions, ss.Generation, conditions.TypeListenerReady, metav1.ConditionTrue, conditions.ReasonListenerRunning, "Listener deployment is running")
 	ss.Status.Listener.Ready = true
 	return nil
 }
@@ -353,7 +354,7 @@ func (r *RunnerScaleSetReconciler) recordListenerError(ss *ghav1alpha1.RunnerSca
 	if r.Recorder != nil {
 		r.Recorder.Eventf(ss, nil, corev1.EventTypeWarning, "ListenerFailed", "Reconcile", "Failed to ensure listener resources: %v", err)
 	}
-	conditions.SetCondition(&ss.Status.Conditions, conditions.TypeListenerReady, metav1.ConditionFalse, conditions.ReasonListenerNotRunning, err.Error())
+	conditions.SetConditionWithGeneration(&ss.Status.Conditions, ss.Generation, conditions.TypeListenerReady, metav1.ConditionFalse, conditions.ReasonListenerNotRunning, err.Error())
 }
 
 func (r *RunnerScaleSetReconciler) reconcileListenerServiceAccount(ctx context.Context, ss *ghav1alpha1.RunnerScaleSet, owner *metav1apply.OwnerReferenceApplyConfiguration, labels map[string]string) error {
@@ -393,8 +394,12 @@ func (r *RunnerScaleSetReconciler) reconcileListenerRole(ctx context.Context, ss
 			WithVerbs("get", "patch"),
 		rbacv1apply.PolicyRule().
 			WithAPIGroups("gha.walnuts.dev").
+			WithResources("ephemeralrunnersets", "ephemeralrunnersets/status").
+			WithVerbs("get", "list", "watch", "update", "patch"),
+		rbacv1apply.PolicyRule().
+			WithAPIGroups("gha.walnuts.dev").
 			WithResources("ephemeralrunners", "ephemeralrunners/status").
-			WithVerbs("get", "patch"),
+			WithVerbs("get", "list", "watch", "update", "patch"),
 		rbacv1apply.PolicyRule().
 			WithAPIGroups("gha.walnuts.dev").
 			WithResources("runnernodepools", "runnermachines").
@@ -465,21 +470,9 @@ func (r *RunnerScaleSetReconciler) reconcileListenerRoleBinding(ctx context.Cont
 
 func (r *RunnerScaleSetReconciler) reconcileListenerLease(ctx context.Context, ss *ghav1alpha1.RunnerScaleSet, owner *metav1apply.OwnerReferenceApplyConfiguration, labels map[string]string) error {
 	leaseName := fmt.Sprintf("gha-listener-%s", ss.UID)
-
 	desiredLease := coordinationv1apply.Lease(leaseName, ss.Namespace).
 		WithLabels(labels).
 		WithOwnerReferences(owner)
-
-	var current coordinationv1.Lease
-	err := r.Get(ctx, client.ObjectKey{Namespace: ss.Namespace, Name: leaseName}, &current)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-
-	currentApply, err := coordinationv1apply.ExtractLease(&current, FieldManagerName)
-	if err == nil && equality.Semantic.DeepEqual(desiredLease, currentApply) {
-		return nil
-	}
 
 	return applyResource(ctx, r.Client, desiredLease)
 }
@@ -487,16 +480,13 @@ func (r *RunnerScaleSetReconciler) reconcileListenerLease(ctx context.Context, s
 func (r *RunnerScaleSetReconciler) reconcileListenerDeployment(ctx context.Context, ss *ghav1alpha1.RunnerScaleSet, owner *metav1apply.OwnerReferenceApplyConfiguration, labels map[string]string) error {
 	deployName := fmt.Sprintf("%s-listener", ss.Name)
 	saName := fmt.Sprintf("%s-listener", ss.Name)
+
 	listenerImage := r.ListenerImage
 	if listenerImage == "" {
-		listenerImage = "ghcr.io/walnuts1018/smart-hibernatable-actions-runner-controller/listener:latest"
+		listenerImage = runner.DefaultListenerImage
 	}
 
-	var credSecret corev1.Secret
-	credHash := ""
-	if err := r.Get(ctx, client.ObjectKey{Namespace: ss.Namespace, Name: ss.Spec.GitHub.CredentialsSecretRef.Name}, &credSecret); err == nil {
-		credHash = fmt.Sprintf("%s-%s", credSecret.UID, credSecret.ResourceVersion)
-	}
+	credHash := r.computeSecretHash(ctx, ss.Namespace, ss.Spec.GitHub.CredentialsSecretRef.Name)
 
 	maxSurge := intstr.FromInt(0)
 	maxUnavailable := intstr.FromInt(1)
@@ -633,107 +623,91 @@ func (r *RunnerScaleSetReconciler) reconcileListenerDeployment(ctx context.Conte
 	return applyResource(ctx, r.Client, desiredDeploy)
 }
 
-func (r *RunnerScaleSetReconciler) reconcileRunners(ctx context.Context, ss *ghav1alpha1.RunnerScaleSet, declaredCapacity int32) error {
+func (r *RunnerScaleSetReconciler) reconcileEphemeralRunnerSet(ctx context.Context, ss *ghav1alpha1.RunnerScaleSet, declaredCapacity int32) error {
 	log := logf.FromContext(ctx)
 
-	var runnerList ghav1alpha1.EphemeralRunnerList
-	if err := r.List(ctx, &runnerList, client.InNamespace(ss.Namespace)); err != nil {
+	// ScaleSet に紐づく EphemeralRunnerSet を取得または作成
+	var ers ghav1alpha1.EphemeralRunnerSet
+	ersName := ss.Name
+	err := r.Get(ctx, client.ObjectKey{Namespace: ss.Namespace, Name: ersName}, &ers)
+	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
 
-	var activeRunners []*ghav1alpha1.EphemeralRunner
-	for i := range runnerList.Items {
-		run := &runnerList.Items[i]
-		matches := false
-		if run.Labels[runner.LabelScaleSetUID] != "" {
-			matches = run.Labels[runner.LabelScaleSetUID] == string(ss.UID)
-		} else {
-			matches = run.Spec.ScaleSetRef.Name == ss.Name
-		}
-		if matches && isRunnerNonTerminal(run.Status.Phase) {
-			activeRunners = append(activeRunners, run)
-		}
-	}
-
-	ss.Status.ActiveRunners = int32(len(activeRunners))
-
-	effectiveMax := min(declaredCapacity, ss.Spec.Scaling.MaxRunners)
-	if ss.Spec.Suspend {
-		effectiveMax = 0
-	}
-	ss.Status.EffectiveMaxRunners = effectiveMax
-
-	targetRunners := min(ss.Status.DesiredRunners, effectiveMax)
-	if ss.Spec.Suspend {
-		targetRunners = 0
-	}
-
-	// スケールアップ (target > active)
-	if targetRunners > int32(len(activeRunners)) {
-		diff := targetRunners - int32(len(activeRunners))
-		log.Info("scaling up ephemeral runners", "count", diff)
-		if r.Recorder != nil {
-			r.Recorder.Eventf(ss, nil, corev1.EventTypeNormal, "ScalingUp", "Reconcile", "Scaling up %d ephemeral runner(s) (target: %d, active: %d)", diff, targetRunners, len(activeRunners))
-		}
-		for range diff {
-			runnerName := runner.GenerateRunnerName(ss.Name)
-			newRunner := &ghav1alpha1.EphemeralRunner{
-				Name:      runnerName,
+	if apierrors.IsNotFound(err) {
+		log.Info("creating EphemeralRunnerSet for RunnerScaleSet", "scaleSet", ss.Name)
+		zero := int32(0)
+		ers = ghav1alpha1.EphemeralRunnerSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      ersName,
 				Namespace: ss.Namespace,
 				Labels: map[string]string{
 					runner.LabelManagedBy:    runner.LabelManagedByValue,
 					runner.LabelScaleSetUID:  string(ss.UID),
 					runner.LabelScaleSetName: ss.Name,
 				},
-				Spec: ghav1alpha1.EphemeralRunnerSpec{
-					ScaleSetRef: corev1.LocalObjectReference{
-						Name: ss.Name,
-					},
-					RunnerName: runnerName,
+			},
+			Spec: ghav1alpha1.EphemeralRunnerSetSpec{
+				ScaleSetRef: corev1.LocalObjectReference{
+					Name: ss.Name,
 				},
-				Status: ghav1alpha1.EphemeralRunnerStatus{
-					Phase: ghav1alpha1.EphemeralRunnerPhasePending,
-				},
-			}
-
-			if err := controllerutil.SetControllerReference(ss, newRunner, r.Scheme); err != nil {
-				log.Error(err, "failed to set controller reference on runner", "runner", runnerName)
-				continue
-			}
-
-			if err := r.Create(ctx, newRunner); err != nil {
-				log.Error(err, "failed to create ephemeral runner", "runner", runnerName)
+				Replicas: &zero,
+				Runner:   ss.Spec.Runner,
+			},
+		}
+		if err := controllerutil.SetControllerReference(ss, &ers, r.Scheme); err != nil {
+			return err
+		}
+		if err := r.Create(ctx, &ers); err != nil {
+			return err
+		}
+	} else {
+		// テンプレートとScaleSetRefの同期
+		origERS := ers.DeepCopy()
+		ers.Spec.ScaleSetRef.Name = ss.Name
+		ers.Spec.Runner = ss.Spec.Runner
+		if !equality.Semantic.DeepEqual(origERS.Spec, ers.Spec) {
+			if err := r.Update(ctx, &ers); err != nil {
+				return err
 			}
 		}
-	} else if targetRunners < int32(len(activeRunners)) {
-		// スケールダウン: Pending, WaitingForCluster, Idle のみ削除可能
-		diff := int(int32(len(activeRunners)) - targetRunners)
-		deleted := 0
-		for _, run := range activeRunners {
-			if deleted >= diff {
-				break
-			}
-			if run.Status.Phase == ghav1alpha1.EphemeralRunnerPhasePending ||
-				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseWaitingForCluster ||
-				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseIdle {
-				log.Info("scaling down surplus ephemeral runner", "runner", run.Name)
-				if r.Recorder != nil {
-					r.Recorder.Eventf(ss, nil, corev1.EventTypeNormal, "ScalingDown", "Reconcile", "Scaling down surplus ephemeral runner %s", run.Name)
-				}
-				if err := r.Delete(ctx, run); err == nil {
-					deleted++
-				}
+	}
+
+	// ActiveRunners をカウント
+	var runnerList ghav1alpha1.EphemeralRunnerList
+	if err := r.List(ctx, &runnerList, client.InNamespace(ss.Namespace), client.MatchingFields{
+		IndexScaleSetRefName: ss.Name,
+	}); err == nil {
+		activeCount := int32(0)
+		for _, run := range runnerList.Items {
+			if isRunnerNonTerminal(run.Status.Phase) {
+				activeCount++
 			}
 		}
+		ss.Status.ActiveRunners = activeCount
 	}
 
 	return nil
 }
 
+func (r *RunnerScaleSetReconciler) computeSecretHash(ctx context.Context, namespace, secretName string) string {
+	var secret corev1.Secret
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: secretName}, &secret); err != nil {
+		return ""
+	}
+
+	h := sha256.New()
+	for k, v := range secret.Data {
+		h.Write([]byte(k))
+		h.Write(v)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 func (r *RunnerScaleSetReconciler) getGitHubClient(ctx context.Context, ss *ghav1alpha1.RunnerScaleSet) (githubscaleset.ScaleSetClient, error) {
 	var secret corev1.Secret
 	if err := r.Get(ctx, client.ObjectKey{Namespace: ss.Namespace, Name: ss.Spec.GitHub.CredentialsSecretRef.Name}, &secret); err != nil {
-		return nil, fmt.Errorf("failed to get github credentials secret: %w", err)
+		return nil, fmt.Errorf("failed to get credentials secret %s: %w", ss.Spec.GitHub.CredentialsSecretRef.Name, err)
 	}
 
 	auth, err := githubscaleset.ParseGitHubAppAuth(secret.Data)
@@ -744,68 +718,67 @@ func (r *RunnerScaleSetReconciler) getGitHubClient(ctx context.Context, ss *ghav
 	return r.ScaleSetFactory.NewClient(ss.Spec.GitHub.ConfigURL, auth)
 }
 
-func (r *RunnerScaleSetReconciler) getNodePoolDeclaredCapacity(ctx context.Context, nodePool *ghav1alpha1.RunnerNodePool) int32 {
-	selector, err := metav1.LabelSelectorAsSelector(&nodePool.Spec.MachineSelector)
-	if err != nil {
-		return 0
-	}
-	var machineList ghav1alpha1.RunnerMachineList
-	if err := r.List(ctx, &machineList, client.InNamespace(nodePool.Namespace), client.MatchingLabelsSelector{Selector: selector}); err != nil {
-		return 0
-	}
-	var total int32
-	for _, m := range machineList.Items {
-		total += m.Spec.Capacity.Runners
-	}
-	return total
-}
-
 func (r *RunnerScaleSetReconciler) findScaleSetsForNodePool(ctx context.Context, obj client.Object) []ctrl.Request {
-	nodePool, ok := obj.(*ghav1alpha1.RunnerNodePool)
+	pool, ok := obj.(*ghav1alpha1.RunnerNodePool)
 	if !ok {
 		return nil
 	}
 
 	var scaleSets ghav1alpha1.RunnerScaleSetList
-	if err := r.List(ctx, &scaleSets, client.InNamespace(nodePool.Namespace), client.MatchingFields{
-		IndexNodePoolRefName: nodePool.Name,
+	if err := r.List(ctx, &scaleSets, client.InNamespace(pool.Namespace), client.MatchingFields{
+		IndexNodePoolRefName: pool.Name,
 	}); err != nil {
-		// インデックスが未登録の場合はフォールバック
-		if listErr := r.List(ctx, &scaleSets, client.InNamespace(nodePool.Namespace)); listErr != nil {
+		if err := r.List(ctx, &scaleSets, client.InNamespace(pool.Namespace)); err != nil {
 			return nil
 		}
-		var reqs []ctrl.Request
-		for _, ss := range scaleSets.Items {
-			if ss.Spec.NodePoolRef.Name == nodePool.Name {
-				reqs = append(reqs, ctrl.Request{
-					Namespace: ss.Namespace,
-					Name:      ss.Name,
-				})
-			}
-		}
-		return reqs
 	}
 
-	reqs := make([]ctrl.Request, 0, len(scaleSets.Items))
+	var requests []ctrl.Request
 	for _, ss := range scaleSets.Items {
-		reqs = append(reqs, ctrl.Request{
-			Namespace: ss.Namespace,
-			Name:      ss.Name,
-		})
+		if ss.Spec.NodePoolRef.Name == pool.Name {
+			requests = append(requests, ctrl.Request{
+				Namespace: ss.Namespace,
+				Name:      ss.Name,
+			})
+		}
 	}
-	return reqs
+	return requests
+}
+
+func (r *RunnerScaleSetReconciler) findScaleSetsForRunner(ctx context.Context, obj client.Object) []ctrl.Request {
+	runner, ok := obj.(*ghav1alpha1.EphemeralRunner)
+	if !ok || runner.Spec.ScaleSetRef.Name == "" {
+		return nil
+	}
+
+	return []ctrl.Request{
+		{
+			Namespace: runner.Namespace,
+			Name:      runner.Spec.ScaleSetRef.Name,
+		},
+	}
+}
+
+func (r *RunnerScaleSetReconciler) findScaleSetsForRunnerSet(ctx context.Context, obj client.Object) []ctrl.Request {
+	ers, ok := obj.(*ghav1alpha1.EphemeralRunnerSet)
+	if !ok || ers.Spec.ScaleSetRef.Name == "" {
+		return nil
+	}
+
+	return []ctrl.Request{
+		{
+			Namespace: ers.Namespace,
+			Name:      ers.Spec.ScaleSetRef.Name,
+		},
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *RunnerScaleSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&ghav1alpha1.RunnerScaleSet{}).
-		Owns(&ghav1alpha1.EphemeralRunner{}).
-		Owns(&appsv1.Deployment{}).
-		Owns(&corev1.ServiceAccount{}).
-		Owns(&rbacv1.Role{}).
-		Owns(&rbacv1.RoleBinding{}).
-		Owns(&coordinationv1.Lease{}).
 		Watches(&ghav1alpha1.RunnerNodePool{}, handler.EnqueueRequestsFromMapFunc(r.findScaleSetsForNodePool)).
+		Watches(&ghav1alpha1.EphemeralRunnerSet{}, handler.EnqueueRequestsFromMapFunc(r.findScaleSetsForRunnerSet)).
+		Watches(&ghav1alpha1.EphemeralRunner{}, handler.EnqueueRequestsFromMapFunc(r.findScaleSetsForRunner)).
 		Complete(r)
 }

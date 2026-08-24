@@ -69,6 +69,20 @@ spec:
                 description: RunnerName is the unique name of this runner instance
                   registered in GitHub Actions and used for the remote Pod.
                 type: string
+              runnerSetRef:
+                description: RunnerSetRef optionally references the managing EphemeralRunnerSet.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               scaleSetRef:
                 description: ScaleSetRef references the parent RunnerScaleSet.
                 properties:
@@ -212,6 +226,11 @@ spec:
                     format: date-time
                     type: string
                 type: object
+              observedGeneration:
+                description: ObservedGeneration is the most recent generation observed
+                  for this resource.
+                format: int64
+                type: integer
               phase:
                 default: Pending
                 description: Phase is the current execution phase of the ephemeral

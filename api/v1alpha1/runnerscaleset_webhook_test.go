@@ -56,18 +56,10 @@ func TestRunnerScaleSetDefaulting(t *testing.T) {
 	if ss.Spec.Scaling.MinRunners != 0 {
 		t.Errorf("expected MinRunners 0, got %d", ss.Spec.Scaling.MinRunners)
 	}
-	if ss.Spec.Scaling.MaxRunners != 2 {
-		t.Errorf("expected MaxRunners 2, got %d", ss.Spec.Scaling.MaxRunners)
-	}
-	if ss.Spec.Runner.ContainerName != "runner" {
-		t.Errorf("expected ContainerName 'runner', got %q", ss.Spec.Runner.ContainerName)
-	}
-	if ss.Spec.Runner.WorkDir != "_work" {
-		t.Errorf("expected WorkDir '_work', got %q", ss.Spec.Runner.WorkDir)
-	}
 }
 
 func TestRunnerScaleSetValidateCreate(t *testing.T) {
+	two := int32(2)
 	tests := []struct {
 		name    string
 		mutate  func(ss *RunnerScaleSet)
@@ -117,14 +109,16 @@ func TestRunnerScaleSetValidateCreate(t *testing.T) {
 			name: "minRunners > maxRunners",
 			mutate: func(ss *RunnerScaleSet) {
 				ss.Spec.Scaling.MinRunners = 5
-				ss.Spec.Scaling.MaxRunners = 2
+				maxVal := int32(2)
+				ss.Spec.Scaling.MaxRunners = &maxVal
 			},
 			wantErr: true,
 		},
 		{
 			name: "maxRunners < 1",
 			mutate: func(ss *RunnerScaleSet) {
-				ss.Spec.Scaling.MaxRunners = 0
+				zero := int32(0)
+				ss.Spec.Scaling.MaxRunners = &zero
 			},
 			wantErr: true,
 		},
@@ -132,13 +126,6 @@ func TestRunnerScaleSetValidateCreate(t *testing.T) {
 			name: "no containers in runner template",
 			mutate: func(ss *RunnerScaleSet) {
 				ss.Spec.Runner.Template.Spec.Containers = nil
-			},
-			wantErr: true,
-		},
-		{
-			name: "container name mismatch",
-			mutate: func(ss *RunnerScaleSet) {
-				ss.Spec.Runner.ContainerName = "non-existent"
 			},
 			wantErr: true,
 		},
@@ -205,11 +192,9 @@ func TestRunnerScaleSetValidateCreate(t *testing.T) {
 					NodePoolRef: corev1.LocalObjectReference{Name: "test-pool"},
 					Scaling: RunnerScaleSetScalingSpec{
 						MinRunners: 0,
-						MaxRunners: 2,
+						MaxRunners: &two,
 					},
 					Runner: RunnerTemplateSpec{
-						ContainerName: "runner",
-						WorkDir:       "_work",
 						Template: corev1.PodTemplateSpec{
 							Spec: corev1.PodSpec{
 								Containers: []corev1.Container{
@@ -231,6 +216,7 @@ func TestRunnerScaleSetValidateCreate(t *testing.T) {
 }
 
 func TestRunnerScaleSetValidateUpdate(t *testing.T) {
+	two := int32(2)
 	oldSS := &RunnerScaleSet{
 		Name:      "test-scaleset",
 		Namespace: "default",
@@ -244,11 +230,9 @@ func TestRunnerScaleSetValidateUpdate(t *testing.T) {
 			NodePoolRef: corev1.LocalObjectReference{Name: "test-pool"},
 			Scaling: RunnerScaleSetScalingSpec{
 				MinRunners: 0,
-				MaxRunners: 2,
+				MaxRunners: &two,
 			},
 			Runner: RunnerTemplateSpec{
-				ContainerName: "runner",
-				WorkDir:       "_work",
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
@@ -262,7 +246,8 @@ func TestRunnerScaleSetValidateUpdate(t *testing.T) {
 
 	t.Run("valid update (scaling only)", func(t *testing.T) {
 		newSS := oldSS.DeepCopy()
-		newSS.Spec.Scaling.MaxRunners = 5
+		five := int32(5)
+		newSS.Spec.Scaling.MaxRunners = &five
 		_, err := newSS.ValidateUpdate(context.Background(), oldSS, newSS)
 		if err != nil {
 			t.Errorf("expected valid update, got error: %v", err)

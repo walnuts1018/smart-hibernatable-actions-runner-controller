@@ -14,7 +14,10 @@ const (
 	// IndexNodePoolRefNameはRunnerScaleSetのspec.nodePoolRef.nameのインデックスキーです
 	IndexNodePoolRefName = ".spec.nodePoolRef.name"
 
-	// IndexScaleSetRefNameはEphemeralRunnerのspec.scaleSetRef.nameのインデックスキーです
+	// IndexMachineNodePoolRefNameはRunnerMachineのspec.nodePoolRef.nameのインデックスキーです
+	IndexMachineNodePoolRefName = ".spec.nodePoolRef.name"
+
+	// IndexScaleSetRefNameはEphemeralRunner / EphemeralRunnerSetのspec.scaleSetRef.nameのインデックスキーです
 	IndexScaleSetRefName = ".spec.scaleSetRef.name"
 
 	// IndexClusterRefNameはRunnerMachineのspec.clusterRef.nameのインデックスキーです
@@ -39,7 +42,29 @@ func SetupIndexesWithManager(mgr ctrl.Manager) error {
 		return fmt.Errorf("failed to setup index for RunnerScaleSet %s: %w", IndexNodePoolRefName, err)
 	}
 
-	// 2. EphemeralRunner -> ScaleSetRef
+	// 2. RunnerMachine -> NodePoolRef
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &ghav1alpha1.RunnerMachine{}, IndexMachineNodePoolRefName, func(obj client.Object) []string {
+		rm, ok := obj.(*ghav1alpha1.RunnerMachine)
+		if !ok || rm.Spec.NodePoolRef == nil || rm.Spec.NodePoolRef.Name == "" {
+			return nil
+		}
+		return []string{rm.Spec.NodePoolRef.Name}
+	}); err != nil {
+		return fmt.Errorf("failed to setup index for RunnerMachine %s: %w", IndexMachineNodePoolRefName, err)
+	}
+
+	// 3. EphemeralRunnerSet -> ScaleSetRef
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &ghav1alpha1.EphemeralRunnerSet{}, IndexScaleSetRefName, func(obj client.Object) []string {
+		ers, ok := obj.(*ghav1alpha1.EphemeralRunnerSet)
+		if !ok || ers.Spec.ScaleSetRef.Name == "" {
+			return nil
+		}
+		return []string{ers.Spec.ScaleSetRef.Name}
+	}); err != nil {
+		return fmt.Errorf("failed to setup index for EphemeralRunnerSet %s: %w", IndexScaleSetRefName, err)
+	}
+
+	// 4. EphemeralRunner -> ScaleSetRef
 	if err := mgr.GetFieldIndexer().IndexField(ctx, &ghav1alpha1.EphemeralRunner{}, IndexScaleSetRefName, func(obj client.Object) []string {
 		er, ok := obj.(*ghav1alpha1.EphemeralRunner)
 		if !ok || er.Spec.ScaleSetRef.Name == "" {
@@ -50,7 +75,7 @@ func SetupIndexesWithManager(mgr ctrl.Manager) error {
 		return fmt.Errorf("failed to setup index for EphemeralRunner %s: %w", IndexScaleSetRefName, err)
 	}
 
-	// 3. RunnerMachine -> ClusterRef
+	// 5. RunnerMachine -> ClusterRef
 	if err := mgr.GetFieldIndexer().IndexField(ctx, &ghav1alpha1.RunnerMachine{}, IndexClusterRefName, func(obj client.Object) []string {
 		rm, ok := obj.(*ghav1alpha1.RunnerMachine)
 		if !ok || rm.Spec.ClusterRef.Name == "" {
@@ -61,7 +86,7 @@ func SetupIndexesWithManager(mgr ctrl.Manager) error {
 		return fmt.Errorf("failed to setup index for RunnerMachine %s: %w", IndexClusterRefName, err)
 	}
 
-	// 4. EphemeralRunner -> GitHub RunnerName (for Listener reverse lookup)
+	// 6. EphemeralRunner -> GitHub RunnerName (for Listener reverse lookup)
 	if err := mgr.GetFieldIndexer().IndexField(ctx, &ghav1alpha1.EphemeralRunner{}, IndexGitHubRunnerName, func(obj client.Object) []string {
 		er, ok := obj.(*ghav1alpha1.EphemeralRunner)
 		if !ok {

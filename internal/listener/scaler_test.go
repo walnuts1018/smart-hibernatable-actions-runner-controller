@@ -21,23 +21,29 @@ func TestScalerHandler_HandleDesiredRunnerCount(t *testing.T) {
 	nodePool := &ghav1alpha1.RunnerNodePool{}
 	nodePool.Name = "pool-1"
 	nodePool.Namespace = "default"
-	nodePool.Spec.MachineSelector.MatchLabels = map[string]string{"pool": "pool-1"}
 
 	machine := &ghav1alpha1.RunnerMachine{}
 	machine.Name = "m1"
 	machine.Namespace = "default"
-	machine.Labels = map[string]string{"pool": "pool-1"}
-	machine.Spec.Capacity.Runners = 4
+	machine.Spec.Capacity.RunnerSlots = 4
 
+	ten := int32(10)
 	scaleSet := &ghav1alpha1.RunnerScaleSet{}
 	scaleSet.Name = "test-ss"
 	scaleSet.Namespace = "default"
 	scaleSet.Spec.NodePoolRef.Name = "pool-1"
 	scaleSet.Spec.Scaling.MinRunners = 0
-	scaleSet.Spec.Scaling.MaxRunners = 10
+	scaleSet.Spec.Scaling.MaxRunners = &ten
 	scaleSet.Status.EffectiveMaxRunners = 4
 
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nodePool, machine, scaleSet).WithStatusSubresource(scaleSet).Build()
+	zero := int32(0)
+	ers := &ghav1alpha1.EphemeralRunnerSet{}
+	ers.Name = "test-ss"
+	ers.Namespace = "default"
+	ers.Spec.ScaleSetRef.Name = "test-ss"
+	ers.Spec.Replicas = &zero
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nodePool, machine, scaleSet, ers).WithStatusSubresource(scaleSet, ers).Build()
 	tracker := NewReadinessTracker()
 
 	scaler := NewScalerHandler(fakeClient, "default", "test-ss", tracker)
@@ -55,9 +61,6 @@ func TestScalerHandler_HandleDesiredRunnerCount(t *testing.T) {
 		t.Fatalf("failed to get updated scaleSet: %v", err)
 	}
 
-	if updated.Status.DesiredRunners != 2 {
-		t.Fatalf("expected DesiredRunners 2, got %d", updated.Status.DesiredRunners)
-	}
 	if updated.Status.GitHub.AssignedJobs != 2 {
 		t.Fatalf("expected AssignedJobs 2, got %d", updated.Status.GitHub.AssignedJobs)
 	}
@@ -68,17 +71,25 @@ func TestScalerHandler_HandleDesiredRunnerCount(t *testing.T) {
 		t.Fatal("expected initialStatisticsReceived to be true")
 	}
 
-	// declared capacity (4) を超える要求 (例えば6) が来た場合、4にcapされることを検証
+	var updatedERS ghav1alpha1.EphemeralRunnerSet
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-ss"}, &updatedERS); err != nil {
+		t.Fatalf("failed to get updated ERS: %v", err)
+	}
+	if updatedERS.Spec.Replicas == nil || *updatedERS.Spec.Replicas != 2 {
+		t.Fatalf("expected ERS replicas 2, got %v", updatedERS.Spec.Replicas)
+	}
+
+	// effectiveMax (4) を超える要求 (例えば6) が来た場合、4にcapされることを検証
 	_, err = scaler.HandleDesiredRunnerCount(context.Background(), 6)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-ss"}, &updated); err != nil {
-		t.Fatalf("failed to get updated scaleSet: %v", err)
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-ss"}, &updatedERS); err != nil {
+		t.Fatalf("failed to get updated ERS: %v", err)
 	}
-	if updated.Status.DesiredRunners != 4 {
-		t.Fatalf("expected DesiredRunners to be capped at 4, got %d", updated.Status.DesiredRunners)
+	if updatedERS.Spec.Replicas == nil || *updatedERS.Spec.Replicas != 4 {
+		t.Fatalf("expected ERS replicas to be capped at 4, got %v", updatedERS.Spec.Replicas)
 	}
 }
 
@@ -98,42 +109,43 @@ func TestScalerHandler_HandleJobStartedAndCompleted(t *testing.T) {
 	jobStarted := &scaleset.JobStarted{}
 	jobStarted.RunnerName = "runner-1"
 	jobStarted.RunnerID = 12345
-	jobStarted.JobID = "67890"
+	jobStarted.JobID = "100"
 
-	err := scaler.HandleJobStarted(context.Background(), jobStarted)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := scaler.HandleJobStarted(context.Background(), jobStarted); err != nil {
+		t.Fatalf("unexpected error on job started: %v", err)
 	}
 
-	var updated ghav1alpha1.EphemeralRunner
-	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "runner-1"}, &updated); err != nil {
+	var updatedRunner ghav1alpha1.EphemeralRunner
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "runner-1"}, &updatedRunner); err != nil {
 		t.Fatalf("failed to get runner: %v", err)
 	}
-	if updated.Status.Phase != ghav1alpha1.EphemeralRunnerPhaseBusy {
-		t.Fatalf("expected phase Busy, got %s", updated.Status.Phase)
+
+	if updatedRunner.Status.Phase != ghav1alpha1.EphemeralRunnerPhaseBusy {
+		t.Errorf("expected phase Busy, got %v", updatedRunner.Status.Phase)
 	}
-	if updated.Status.GitHub.RunnerID != 12345 {
-		t.Fatalf("expected runnerID 12345, got %d", updated.Status.GitHub.RunnerID)
+	if updatedRunner.Status.GitHub.RunnerID != 12345 {
+		t.Errorf("expected runnerID 12345, got %d", updatedRunner.Status.GitHub.RunnerID)
 	}
-	if updated.Status.GitHub.JobID != 67890 {
-		t.Fatalf("expected jobID 67890, got %d", updated.Status.GitHub.JobID)
+	if updatedRunner.Status.GitHub.JobID != 100 {
+		t.Errorf("expected jobID 100, got %d", updatedRunner.Status.GitHub.JobID)
 	}
 
 	jobCompleted := &scaleset.JobCompleted{}
 	jobCompleted.RunnerName = "runner-1"
+	jobCompleted.Result = "success"
 
-	err = scaler.HandleJobCompleted(context.Background(), jobCompleted)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := scaler.HandleJobCompleted(context.Background(), jobCompleted); err != nil {
+		t.Fatalf("unexpected error on job completed: %v", err)
 	}
 
-	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "runner-1"}, &updated); err != nil {
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "runner-1"}, &updatedRunner); err != nil {
 		t.Fatalf("failed to get runner: %v", err)
 	}
-	if !updated.Status.GitHub.CompletedObserved {
-		t.Fatal("expected CompletedObserved to be true")
+
+	if updatedRunner.Status.Phase != ghav1alpha1.EphemeralRunnerPhaseCompleted {
+		t.Errorf("expected phase Completed, got %v", updatedRunner.Status.Phase)
 	}
-	if updated.Status.Phase != ghav1alpha1.EphemeralRunnerPhaseBusy {
-		t.Fatalf("expected phase to remain Busy, got %s", updated.Status.Phase)
+	if !updatedRunner.Status.GitHub.CompletedObserved {
+		t.Errorf("expected completedObserved true, got %v", updatedRunner.Status.GitHub.CompletedObserved)
 	}
 }

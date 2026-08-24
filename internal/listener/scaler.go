@@ -36,7 +36,7 @@ func NewScalerHandler(k8sClient client.Client, namespace, name string, tracker *
 	}
 }
 
-// HandleDesiredRunnerCount handles the desired runner count received from GitHub Actions and updates RunnerScaleSet status.
+// HandleDesiredRunnerCount handles the desired runner count received from GitHub Actions and updates EphemeralRunnerSet.
 func (s *ScalerHandler) HandleDesiredRunnerCount(ctx context.Context, count int) (int, error) {
 	scalerLogger.Info("received desired runner count from GitHub", "count", count)
 
@@ -61,18 +61,30 @@ func (s *ScalerHandler) HandleDesiredRunnerCount(ctx context.Context, count int)
 		}
 
 		calculatedTarget = targetRunners
-		ss.Status.DesiredRunners = targetRunners
 		ss.Status.GitHub.AssignedJobs = int32(count)
 		now := metav1.Now()
 		ss.Status.Listener.LastPollTime = &now
 		ss.Status.Listener.Ready = true
 
 		patch := client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{})
-		return s.client.Status().Patch(ctx, &ss, patch)
+		if err := s.client.Status().Patch(ctx, &ss, patch); err != nil {
+			return err
+		}
+
+		// EphemeralRunnerSet.spec.replicas を更新
+		var ers ghav1alpha1.EphemeralRunnerSet
+		if err := s.client.Get(ctx, client.ObjectKey{Namespace: s.namespace, Name: s.name}, &ers); err == nil {
+			origERS := ers.DeepCopy()
+			ers.Spec.Replicas = &targetRunners
+			patchERS := client.MergeFromWithOptions(origERS, client.MergeFromWithOptimisticLock{})
+			_ = s.client.Patch(ctx, &ers, patchERS)
+		}
+
+		return nil
 	})
 
 	if err != nil {
-		scalerLogger.Error(err, "failed to patch desiredRunners on RunnerScaleSet")
+		scalerLogger.Error(err, "failed to update status/replicas on desired runner count")
 		return 0, err
 	}
 
@@ -102,38 +114,25 @@ func (s *ScalerHandler) HandleJobStarted(ctx context.Context, jobInfo *scaleset.
 		}
 
 		orig := epRunner.DeepCopy()
-
-		// Terminal状態（Completed, Failed, Deleting）は巻き戻さない（単調遷移）
-		switch epRunner.Status.Phase {
-		case ghav1alpha1.EphemeralRunnerPhaseCompleted, ghav1alpha1.EphemeralRunnerPhaseFailed, ghav1alpha1.EphemeralRunnerPhaseDeleting:
-			return nil
-		case ghav1alpha1.EphemeralRunnerPhaseBusy:
-			// 既にBusy
-		case ghav1alpha1.EphemeralRunnerPhasePending, ghav1alpha1.EphemeralRunnerPhaseWaitingForCluster,
-			ghav1alpha1.EphemeralRunnerPhaseProvisioning, ghav1alpha1.EphemeralRunnerPhaseStarting,
-			ghav1alpha1.EphemeralRunnerPhaseIdle:
-			epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseBusy
-		}
-
+		epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseBusy
 		epRunner.Status.GitHub.RunnerID = int64(jobInfo.RunnerID)
-		if jobID, err := strconv.ParseInt(jobInfo.JobID, 10, 64); err == nil {
-			epRunner.Status.GitHub.JobID = jobID
+		if parsedJobID, err := strconv.ParseInt(jobInfo.JobID, 10, 64); err == nil {
+			epRunner.Status.GitHub.JobID = parsedJobID
 		}
-		if epRunner.Status.GitHub.StartedObservedAt == nil {
-			now := metav1.Now()
-			epRunner.Status.GitHub.StartedObservedAt = &now
-		}
+		now := metav1.Now()
+		epRunner.Status.GitHub.StartedObservedAt = &now
+
 		patch := client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{})
 		return s.client.Status().Patch(ctx, &epRunner, patch)
 	})
 }
 
-// HandleJobCompleted handles the notification when a job finishes on a runner.
+// HandleJobCompleted handles the notification when a job completes on a runner.
 func (s *ScalerHandler) HandleJobCompleted(ctx context.Context, jobInfo *scaleset.JobCompleted) error {
 	if jobInfo == nil || jobInfo.RunnerName == "" {
 		return nil
 	}
-	scalerLogger.Info("job completed notification received from GitHub", "runnerName", jobInfo.RunnerName)
+	scalerLogger.Info("job completed on runner", "runnerName", jobInfo.RunnerName, "result", jobInfo.Result)
 
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		var epRunner ghav1alpha1.EphemeralRunner
@@ -146,6 +145,12 @@ func (s *ScalerHandler) HandleJobCompleted(ctx context.Context, jobInfo *scalese
 		now := metav1.Now()
 		epRunner.Status.GitHub.CompletedObservedAt = &now
 		epRunner.Status.GitHub.CompletedResult = jobInfo.Result
+
+		if jobInfo.Result == "success" {
+			epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseCompleted
+		} else {
+			epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseFailed
+		}
 
 		patch := client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{})
 		return s.client.Status().Patch(ctx, &epRunner, patch)

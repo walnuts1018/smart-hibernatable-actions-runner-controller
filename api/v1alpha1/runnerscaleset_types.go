@@ -39,13 +39,13 @@ type GitHubScaleSetSpec struct {
 	// +optional
 	RunnerGroup string `json:"runnerGroup,omitempty"`
 
-	// CredentialsSecretRef references the Secret containing GitHub App credentials (github_app_id, github_app_installation_id, github_app_private_key).
+	// CredentialsSecretRef references the Secret containing GitHub App credentials (github_app_id, github_app_installation_id, github_app_private_key) or PAT (github_token).
 	// +kubebuilder:validation:Required
 	CredentialsSecretRef corev1.LocalObjectReference `json:"credentialsSecretRef"`
 }
 
 // RunnerScaleSetScalingSpec defines the autoscaling runner limits for the scale set.
-// +kubebuilder:validation:XValidation:rule="self.minRunners <= self.maxRunners",message="minRunners must be less than or equal to maxRunners"
+// +kubebuilder:validation:XValidation:rule="!has(self.maxRunners) || self.minRunners <= self.maxRunners",message="minRunners must be less than or equal to maxRunners"
 type RunnerScaleSetScalingSpec struct {
 	// MinRunners is the minimum number of idle/standby runners to maintain.
 	// +kubebuilder:default=0
@@ -53,25 +53,14 @@ type RunnerScaleSetScalingSpec struct {
 	// +optional
 	MinRunners int32 `json:"minRunners"`
 
-	// MaxRunners is the maximum number of concurrent runner pods allowed for this scale set.
-	// +kubebuilder:default=2
+	// MaxRunners is the maximum number of concurrent runner pods allowed for this scale set. If unset, limited only by NodePool potential capacity.
 	// +kubebuilder:validation:Minimum=1
 	// +optional
-	MaxRunners int32 `json:"maxRunners"`
+	MaxRunners *int32 `json:"maxRunners,omitempty"`
 }
 
 // RunnerTemplateSpec defines the configuration of the ephemeral runner Pod.
 type RunnerTemplateSpec struct {
-	// ContainerName is the name of the primary runner container in the pod template.
-	// +kubebuilder:default="runner"
-	// +optional
-	ContainerName string `json:"containerName,omitempty"`
-
-	// WorkDir is the working directory for runner jobs.
-	// +kubebuilder:default="_work"
-	// +optional
-	WorkDir string `json:"workDir,omitempty"`
-
 	// Template is the pod template for executing ephemeral runner workloads on the remote cluster.
 	// +kubebuilder:validation:Required
 	Template corev1.PodTemplateSpec `json:"template"`
@@ -157,17 +146,17 @@ type ListenerStatus struct {
 
 // RunnerScaleSetStatus defines the observed state of RunnerScaleSet.
 type RunnerScaleSetStatus struct {
+	// ObservedGeneration is the most recent generation observed for this resource.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// ScaleSetID is the numeric ID assigned to this scale set by GitHub Actions.
 	// +optional
 	ScaleSetID int64 `json:"scaleSetID,omitempty"`
 
-	// EffectiveMaxRunners is the dynamically calculated upper limit of runners (min of Spec.Scaling.MaxRunners and NodePool capacity, or 0 if suspended).
+	// EffectiveMaxRunners is the dynamically calculated upper limit of runners (min of Spec.Scaling.MaxRunners and NodePool potential capacity, or 0 if suspended).
 	// +optional
 	EffectiveMaxRunners int32 `json:"effectiveMaxRunners"`
-
-	// DesiredRunners is the calculated target number of ephemeral runners to satisfy demand.
-	// +optional
-	DesiredRunners int32 `json:"desiredRunners"`
 
 	// ActiveRunners is the count of non-terminal EphemeralRunner custom resources currently tracked.
 	// +optional
@@ -192,7 +181,7 @@ type RunnerScaleSetStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=rscaleset;rss,categories=gha;all
 // +kubebuilder:printcolumn:name="ScaleSetID",type="integer",JSONPath=".status.scaleSetID",description="GitHub ScaleSet ID"
-// +kubebuilder:printcolumn:name="Desired",type="integer",JSONPath=".status.desiredRunners",description="Desired runners count"
+// +kubebuilder:printcolumn:name="Effective Max",type="integer",JSONPath=".status.effectiveMaxRunners",description="Effective max runners"
 // +kubebuilder:printcolumn:name="Active",type="integer",JSONPath=".status.activeRunners",description="Active runners count"
 // +kubebuilder:printcolumn:name="Assigned",type="integer",JSONPath=".status.github.assignedJobs",description="Assigned jobs count"
 // +kubebuilder:printcolumn:name="Busy",type="integer",JSONPath=".status.github.busyRunners",description="Busy runners count"

@@ -22,17 +22,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// ScalingStrategy defines how physical machines in the pool are selected for scaling.
-// +kubebuilder:validation:Enum=Ordered
-type ScalingStrategy string
-
-// Scaling strategy constants.
-const (
-	ScalingStrategyOrdered ScalingStrategy = "Ordered"
-)
-
 // RunnerNodePoolScalingSpec defines autoscaling parameters for physical machines in the pool.
-// +kubebuilder:validation:XValidation:rule="self.minNodes <= self.maxNodes",message="minNodes must be less than or equal to maxNodes"
+// +kubebuilder:validation:XValidation:rule="!has(self.maxNodes) || self.minNodes <= self.maxNodes",message="minNodes must be less than or equal to maxNodes"
 type RunnerNodePoolScalingSpec struct {
 	// MinNodes is the minimum number of physical machines to keep powered on.
 	// +kubebuilder:default=0
@@ -40,21 +31,23 @@ type RunnerNodePoolScalingSpec struct {
 	// +optional
 	MinNodes int32 `json:"minNodes"`
 
-	// MaxNodes is the maximum number of physical machines allowed to be powered on.
-	// +kubebuilder:default=1
+	// MaxNodes is the maximum number of physical machines allowed to be powered on. If unset, all machines in pool are allowed.
 	// +kubebuilder:validation:Minimum=1
 	// +optional
-	MaxNodes int32 `json:"maxNodes"`
+	MaxNodes *int32 `json:"maxNodes,omitempty"`
 
 	// ScaleDownDelay is the duration to wait with zero demand before initiating power off.
 	// +kubebuilder:default="10m"
 	// +optional
 	ScaleDownDelay *metav1.Duration `json:"scaleDownDelay,omitempty"`
+}
 
-	// Strategy defines the ordering strategy for scaling machines.
-	// +kubebuilder:default="Ordered"
+// NodePoolDrainSpec defines node draining parameters for the pool.
+type NodePoolDrainSpec struct {
+	// Timeout is the maximum duration to wait for runner pods to drain before considering the drain stalled.
+	// +kubebuilder:default="10m"
 	// +optional
-	Strategy ScalingStrategy `json:"strategy,omitempty"`
+	Timeout *metav1.Duration `json:"timeout,omitempty"`
 }
 
 // RunnerNodePoolSpec defines the desired state of RunnerNodePool.
@@ -64,9 +57,9 @@ type RunnerNodePoolSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="clusterRef is immutable"
 	ClusterRef corev1.LocalObjectReference `json:"clusterRef"`
 
-	// MachineSelector selects RunnerMachine resources that belong to this pool.
-	// +kubebuilder:validation:Required
-	MachineSelector metav1.LabelSelector `json:"machineSelector"`
+	// Drain defines node draining parameters for machines in the pool.
+	// +optional
+	Drain *NodePoolDrainSpec `json:"drain,omitempty"`
 
 	// Scaling defines scaling parameters for machines in the pool.
 	// +optional
@@ -75,6 +68,10 @@ type RunnerNodePoolSpec struct {
 
 // RunnerNodePoolStatus defines the observed state of RunnerNodePool.
 type RunnerNodePoolStatus struct {
+	// ObservedGeneration is the most recent generation observed for this resource.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// DesiredNodes is the number of physical machines calculated as needed to satisfy demand.
 	// +optional
 	DesiredNodes int32 `json:"desiredNodes"`
@@ -87,13 +84,17 @@ type RunnerNodePoolStatus struct {
 	// +optional
 	ReadyNodes int32 `json:"readyNodes"`
 
-	// DesiredRunnerCapacity is the aggregated runner capacity needed across all referencing RunnerScaleSets.
+	// PotentialRunnerCapacity is the aggregated runner capacity across all machines in the pool if powered on.
 	// +optional
-	DesiredRunnerCapacity int32 `json:"desiredRunnerCapacity"`
+	PotentialRunnerCapacity int32 `json:"potentialRunnerCapacity"`
 
 	// ReadyRunnerCapacity is the current runner capacity available from Ready machines.
 	// +optional
 	ReadyRunnerCapacity int32 `json:"readyRunnerCapacity"`
+
+	// DesiredRunnerCapacity is the aggregated runner capacity needed across all referencing RunnerScaleSets.
+	// +optional
+	DesiredRunnerCapacity int32 `json:"desiredRunnerCapacity"`
 
 	// IdleSince records the timestamp when runner demand first dropped to zero across all scale sets.
 	// +optional
@@ -143,6 +144,7 @@ type MachinePlanStatus struct {
 // +kubebuilder:printcolumn:name="Desired Nodes",type="integer",JSONPath=".status.desiredNodes",description="Desired number of physical nodes"
 // +kubebuilder:printcolumn:name="Powered On",type="integer",JSONPath=".status.poweredOnNodes",description="Powered on nodes count"
 // +kubebuilder:printcolumn:name="Ready Nodes",type="integer",JSONPath=".status.readyNodes",description="Ready nodes count"
+// +kubebuilder:printcolumn:name="Potential Capacity",type="integer",JSONPath=".status.potentialRunnerCapacity",description="Total runner capacity in pool"
 // +kubebuilder:printcolumn:name="Ready Capacity",type="integer",JSONPath=".status.readyRunnerCapacity",description="Currently available runner capacity"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 

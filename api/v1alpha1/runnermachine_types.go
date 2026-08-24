@@ -35,11 +35,33 @@ const (
 	PowerStatePoweringOff PowerState = "PoweringOff"
 )
 
+// RunnerMachinePowerPolicy defines the power management policy for a machine.
+// +kubebuilder:validation:Enum=OnDemand;AlwaysOn
+type RunnerMachinePowerPolicy string
+
+const (
+	// RunnerMachinePowerPolicyOnDemand allows SHARC to power off the machine when idle.
+	RunnerMachinePowerPolicyOnDemand RunnerMachinePowerPolicy = "OnDemand"
+	// RunnerMachinePowerPolicyAlwaysOn prevents SHARC from powering off the machine during scale-down.
+	RunnerMachinePowerPolicyAlwaysOn RunnerMachinePowerPolicy = "AlwaysOn"
+)
+
+// RedfishTimeoutPolicy defines what action to take when graceful shutdown times out.
+// +kubebuilder:validation:Enum=Abort;ForceOff
+type RedfishTimeoutPolicy string
+
+const (
+	// RedfishTimeoutPolicyAbort aborts the power off operation and keeps the machine running.
+	RedfishTimeoutPolicyAbort RedfishTimeoutPolicy = "Abort"
+	// RedfishTimeoutPolicyForceOff initiates an immediate hard power cut (ForceOff) after timeout.
+	RedfishTimeoutPolicyForceOff RedfishTimeoutPolicy = "ForceOff"
+)
+
 // RunnerMachineCapacity defines the capacity provided by the physical machine.
 type RunnerMachineCapacity struct {
-	// Runners is the maximum number of concurrent runner Pods this machine can host.
+	// RunnerSlots is the maximum number of concurrent runner slots this machine provides for capacity planning.
 	// +kubebuilder:validation:Minimum=1
-	Runners int32 `json:"runners"`
+	RunnerSlots int32 `json:"runnerSlots"`
 }
 
 // RedfishTLSSpec defines TLS configuration for connecting to the Redfish BMC endpoint.
@@ -54,17 +76,24 @@ type RedfishTLSSpec struct {
 	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
 }
 
-// RedfishPowerSpec defines timeout and fallback settings for Redfish power operations.
-type RedfishPowerSpec struct {
-	// ShutdownTimeout is the duration to wait for graceful shutdown before considering the operation stalled.
+// RedfishShutdownSpec defines timeout and fallback settings for Redfish power shutdown.
+type RedfishShutdownSpec struct {
+	// Timeout is the duration to wait for graceful OS shutdown before applying the TimeoutPolicy.
 	// +kubebuilder:default="3m"
 	// +optional
-	ShutdownTimeout *metav1.Duration `json:"shutdownTimeout,omitempty"`
+	Timeout *metav1.Duration `json:"timeout,omitempty"`
 
-	// ForceOffAfter is the duration after which ForceOff fallback is allowed if graceful shutdown fails. 0s disables ForceOff fallback.
-	// +kubebuilder:default="0s"
+	// TimeoutPolicy specifies whether to abort or force off if graceful shutdown exceeds the timeout.
+	// +kubebuilder:default="Abort"
 	// +optional
-	ForceOffAfter *metav1.Duration `json:"forceOffAfter,omitempty"`
+	TimeoutPolicy RedfishTimeoutPolicy `json:"timeoutPolicy,omitempty"`
+}
+
+// RedfishPowerSpec defines Redfish power control options.
+type RedfishPowerSpec struct {
+	// Shutdown defines parameters for graceful shutdown and timeout fallback.
+	// +optional
+	Shutdown RedfishShutdownSpec `json:"shutdown,omitempty"`
 }
 
 // RedfishSpec defines parameters for Redfish out-of-band management.
@@ -90,6 +119,14 @@ type RedfishSpec struct {
 	// Power defines power control options.
 	// +optional
 	Power RedfishPowerSpec `json:"power,omitempty"`
+}
+
+// MachineDrainSpec defines node draining parameters for the machine.
+type MachineDrainSpec struct {
+	// Timeout is the maximum duration to wait for runner pods to drain before considering the drain stalled.
+	// +kubebuilder:default="10m"
+	// +optional
+	Timeout *metav1.Duration `json:"timeout,omitempty"`
 }
 
 // RunnerMachineKubernetesStatus defines the observed Kubernetes Node status on the runner cluster.
@@ -154,41 +191,6 @@ type RedfishHealthStatus struct {
 	// NextProbeTime is the timestamp when the next Redfish probe is allowed after backoff.
 	// +optional
 	NextProbeTime *metav1.Time `json:"nextProbeTime,omitempty"`
-}
-
-// RunnerMachineSpec defines the desired state of RunnerMachine.
-type RunnerMachineSpec struct {
-	// ClusterRef references the RunnerCluster this machine belongs to.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="clusterRef is immutable"
-	ClusterRef corev1.LocalObjectReference `json:"clusterRef"`
-
-	// KubernetesNodeName is the expected Node name in the runner Kubernetes cluster.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="kubernetesNodeName is immutable"
-	KubernetesNodeName string `json:"kubernetesNodeName"`
-
-	// Bootstrap indicates whether this machine is the bootstrap node required for the runner cluster Kubernetes API to be available.
-	// +kubebuilder:default=false
-	// +optional
-	Bootstrap bool `json:"bootstrap,omitempty"`
-
-	// Capacity specifies the runner capacity provided by this machine.
-	// +kubebuilder:validation:Required
-	Capacity RunnerMachineCapacity `json:"capacity"`
-
-	// Priority specifies selection priority when scaling up (lower value = higher priority).
-	// +kubebuilder:default=100
-	// +optional
-	Priority int32 `json:"priority,omitempty"`
-
-	// Redfish specifies Redfish BMC configuration for power management.
-	// +kubebuilder:validation:Required
-	Redfish RedfishSpec `json:"redfish"`
-
-	// Maintenance enables maintenance mode, preventing SHARC from uncordoning or powering off this machine.
-	// +optional
-	Maintenance *MachineMaintenanceSpec `json:"maintenance,omitempty"`
 }
 
 // MaintenancePowerPolicy defines power handling during maintenance mode.
@@ -265,8 +267,55 @@ type PowerOperationStatus struct {
 	Attempts int32 `json:"attempts"`
 }
 
+// RunnerMachineSpec defines the desired state of RunnerMachine.
+type RunnerMachineSpec struct {
+	// ClusterRef references the RunnerCluster this machine belongs to.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="clusterRef is immutable"
+	ClusterRef corev1.LocalObjectReference `json:"clusterRef"`
+
+	// NodePoolRef references the RunnerNodePool this machine belongs to.
+	// +optional
+	NodePoolRef *corev1.LocalObjectReference `json:"nodePoolRef,omitempty"`
+
+	// NodeName is the expected Node name in the runner Kubernetes cluster.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeName is immutable"
+	NodeName string `json:"nodeName"`
+
+	// PowerPolicy defines the power policy (OnDemand or AlwaysOn).
+	// +kubebuilder:default="OnDemand"
+	// +optional
+	PowerPolicy RunnerMachinePowerPolicy `json:"powerPolicy,omitempty"`
+
+	// Capacity specifies the runner capacity provided by this machine.
+	// +kubebuilder:validation:Required
+	Capacity RunnerMachineCapacity `json:"capacity"`
+
+	// Priority specifies selection priority when scaling up (higher value = higher priority).
+	// +kubebuilder:default=0
+	// +optional
+	Priority int32 `json:"priority,omitempty"`
+
+	// Redfish specifies Redfish BMC configuration for power management.
+	// +kubebuilder:validation:Required
+	Redfish RedfishSpec `json:"redfish"`
+
+	// Drain defines node draining parameters for the machine.
+	// +optional
+	Drain *MachineDrainSpec `json:"drain,omitempty"`
+
+	// Maintenance enables maintenance mode, preventing SHARC from uncordoning or powering off this machine.
+	// +optional
+	Maintenance *MachineMaintenanceSpec `json:"maintenance,omitempty"`
+}
+
 // RunnerMachineStatus defines the observed state of RunnerMachine.
 type RunnerMachineStatus struct {
+	// ObservedGeneration is the most recent generation observed for this resource.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// PowerState is the observed Redfish power state of the machine.
 	// +kubebuilder:default="Unknown"
 	// +optional
@@ -308,8 +357,8 @@ type RunnerMachineStatus struct {
 // +kubebuilder:resource:shortName=rmachine;rm,categories=gha;all
 // +kubebuilder:printcolumn:name="Power State",type="string",JSONPath=".status.powerState",description="Observed power state"
 // +kubebuilder:printcolumn:name="Node Ready",type="boolean",JSONPath=".status.kubernetes.ready",description="Kubernetes Node readiness"
-// +kubebuilder:printcolumn:name="Runners Capacity",type="integer",JSONPath=".spec.capacity.runners",description="Declared runner capacity"
-// +kubebuilder:printcolumn:name="Bootstrap",type="boolean",JSONPath=".spec.bootstrap",description="Bootstrap machine flag"
+// +kubebuilder:printcolumn:name="Runner Slots",type="integer",JSONPath=".spec.capacity.runnerSlots",description="Declared runner slots capacity"
+// +kubebuilder:printcolumn:name="Priority",type="integer",JSONPath=".spec.priority",description="Scale-up priority"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // RunnerMachine is the Schema for the runnermachines API.

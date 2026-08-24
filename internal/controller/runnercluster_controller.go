@@ -50,13 +50,13 @@ func (r *RunnerClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	origCluster := cluster.DeepCopy()
+	cluster.Status.ObservedGeneration = cluster.Generation
 
 	// 1. クラスタに属するMachine一覧を確認して電源状態を集計
 	var machineList ghav1alpha1.RunnerMachineList
 	if err := r.List(ctx, &machineList, client.InNamespace(cluster.Namespace), client.MatchingFields{
 		IndexClusterRefName: cluster.Name,
 	}); err != nil {
-		// インデックスが未登録の場合はフォールバック
 		if err := r.List(ctx, &machineList, client.InNamespace(cluster.Namespace)); err != nil {
 			log.Error(err, "failed to list runner machines")
 			return ctrl.Result{}, err
@@ -88,9 +88,9 @@ func (r *RunnerClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if hasClusterMachine && !hasOnMachine && !hasTransitioningMachine {
 		cluster.Status.APIReachable = false
 		cluster.Status.Phase = ghav1alpha1.RunnerClusterPhaseOffline
-		conditions.SetCondition(&cluster.Status.Conditions, conditions.TypeKubeconfigValid, metav1.ConditionTrue, conditions.ReasonSuccess, "Kubeconfig is present")
-		conditions.SetCondition(&cluster.Status.Conditions, conditions.TypeAPIReachable, metav1.ConditionFalse, conditions.ReasonPowerStateOff, "All runner machines are off")
-		conditions.SetCondition(&cluster.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonPowerStateOff, "All runner machines are off")
+		conditions.SetConditionWithGeneration(&cluster.Status.Conditions, cluster.Generation, conditions.TypeKubeconfigValid, metav1.ConditionTrue, conditions.ReasonSuccess, "Kubeconfig is present")
+		conditions.SetConditionWithGeneration(&cluster.Status.Conditions, cluster.Generation, conditions.TypeAPIReachable, metav1.ConditionFalse, conditions.ReasonPowerStateOff, "All runner machines are off")
+		conditions.SetConditionWithGeneration(&cluster.Status.Conditions, cluster.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonPowerStateOff, "All runner machines are off")
 		metrics.ClusterAPIReachable.WithLabelValues(cluster.Namespace, cluster.Name).Set(0)
 	} else {
 		r.checkClusterHealth(ctx, &cluster, hasTransitioningMachine)
@@ -136,16 +136,16 @@ func (r *RunnerClusterReconciler) checkClusterHealth(ctx context.Context, cluste
 		if r.Recorder != nil && cluster.Status.APIReachable {
 			r.Recorder.Eventf(cluster, nil, corev1.EventTypeWarning, "APIUnreachable", "Reconcile", "Runner cluster API unreachable: %v", err)
 		}
-		conditions.SetCondition(&cluster.Status.Conditions, conditions.TypeKubeconfigValid, metav1.ConditionFalse, conditions.ReasonInvalidKubeconfig, err.Error())
-		conditions.SetCondition(&cluster.Status.Conditions, conditions.TypeAPIReachable, metav1.ConditionFalse, conditions.ReasonAPIUnreachable, err.Error())
+		conditions.SetConditionWithGeneration(&cluster.Status.Conditions, cluster.Generation, conditions.TypeKubeconfigValid, metav1.ConditionFalse, conditions.ReasonInvalidKubeconfig, err.Error())
+		conditions.SetConditionWithGeneration(&cluster.Status.Conditions, cluster.Generation, conditions.TypeAPIReachable, metav1.ConditionFalse, conditions.ReasonAPIUnreachable, err.Error())
 		cluster.Status.APIReachable = false
 		metrics.ClusterAPIReachable.WithLabelValues(cluster.Namespace, cluster.Name).Set(0)
 	} else {
 		if r.Recorder != nil && !cluster.Status.APIReachable {
 			r.Recorder.Eventf(cluster, nil, corev1.EventTypeNormal, "ClusterAPIReachable", "Reconcile", "Runner cluster Kubernetes API is reachable")
 		}
-		conditions.SetCondition(&cluster.Status.Conditions, conditions.TypeKubeconfigValid, metav1.ConditionTrue, conditions.ReasonSuccess, "Kubeconfig is valid")
-		conditions.SetCondition(&cluster.Status.Conditions, conditions.TypeAPIReachable, metav1.ConditionTrue, conditions.ReasonAPISucceeded, "Runner cluster Kubernetes API is reachable")
+		conditions.SetConditionWithGeneration(&cluster.Status.Conditions, cluster.Generation, conditions.TypeKubeconfigValid, metav1.ConditionTrue, conditions.ReasonSuccess, "Kubeconfig is valid")
+		conditions.SetConditionWithGeneration(&cluster.Status.Conditions, cluster.Generation, conditions.TypeAPIReachable, metav1.ConditionTrue, conditions.ReasonAPISucceeded, "Runner cluster Kubernetes API is reachable")
 		cluster.Status.APIReachable = true
 		metrics.ClusterAPIReachable.WithLabelValues(cluster.Namespace, cluster.Name).Set(1)
 
@@ -156,26 +156,24 @@ func (r *RunnerClusterReconciler) checkClusterHealth(ctx context.Context, cluste
 		} else if cluster.Status.ClusterUID == "" {
 			cluster.Status.ClusterUID = clusterUID
 		} else if cluster.Status.ClusterUID != clusterUID {
-			// 明示的な Adoption 指定があるか確認
+			// 宣言的な ExpectedClusterUID による採用確認
 			isAdoptionRequested := cluster.Spec.Identity != nil &&
-				cluster.Spec.Identity.ExpectedUID == clusterUID &&
-				cluster.Spec.Identity.AdoptionGeneration > cluster.Status.ObservedAdoptionGeneration
+				cluster.Spec.Identity.ExpectedClusterUID == clusterUID
 
 			if isAdoptionRequested {
-				log.Info("adopting new remote cluster identity UID", "oldUID", cluster.Status.ClusterUID, "newUID", clusterUID, "generation", cluster.Spec.Identity.AdoptionGeneration)
+				log.Info("adopting new remote cluster identity UID", "oldUID", cluster.Status.ClusterUID, "newUID", clusterUID)
 				if r.Recorder != nil {
-					r.Recorder.Eventf(cluster, nil, corev1.EventTypeNormal, "ClusterAdopted", "Reconcile", "Adopted new cluster UID %s (generation %d)", clusterUID, cluster.Spec.Identity.AdoptionGeneration)
+					r.Recorder.Eventf(cluster, nil, corev1.EventTypeNormal, "ClusterAdopted", "Reconcile", "Adopted new cluster UID %s", clusterUID)
 				}
 				clusterKey := fmt.Sprintf("%s/%s", cluster.Namespace, cluster.Name)
 				r.RemoteProvider.InvalidateCache(clusterKey)
 				cluster.Status.ClusterUID = clusterUID
-				cluster.Status.ObservedAdoptionGeneration = cluster.Spec.Identity.AdoptionGeneration
 			} else {
 				log.Error(fmt.Errorf("cluster identity mismatch"), "remote cluster UID changed (expected %s, got %s)", cluster.Status.ClusterUID, clusterUID)
 				if r.Recorder != nil {
 					r.Recorder.Eventf(cluster, nil, corev1.EventTypeWarning, "ClusterIdentityMismatch", "Reconcile", "Remote cluster UID changed: expected %s, got %s", cluster.Status.ClusterUID, clusterUID)
 				}
-				conditions.SetCondition(&cluster.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonClusterIdentityMismatch, "Remote cluster identity mismatch; stopping mutation (requires explicit spec.identity adoption)")
+				conditions.SetConditionWithGeneration(&cluster.Status.Conditions, cluster.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonClusterIdentityMismatch, "Remote cluster identity mismatch; stopping mutation (requires explicit spec.identity.expectedClusterUID adoption)")
 				cluster.Status.APIReachable = false
 				cluster.Status.Phase = ghav1alpha1.RunnerClusterPhaseDegraded
 			}
@@ -184,13 +182,13 @@ func (r *RunnerClusterReconciler) checkClusterHealth(ctx context.Context, cluste
 
 	if cluster.Status.APIReachable {
 		cluster.Status.Phase = ghav1alpha1.RunnerClusterPhaseReady
-		conditions.SetCondition(&cluster.Status.Conditions, conditions.TypeReady, metav1.ConditionTrue, conditions.ReasonReady, "Runner cluster is ready")
+		conditions.SetConditionWithGeneration(&cluster.Status.Conditions, cluster.Generation, conditions.TypeReady, metav1.ConditionTrue, conditions.ReasonReady, "Runner cluster is ready")
 	} else if hasTransitioningMachine {
 		cluster.Status.Phase = ghav1alpha1.RunnerClusterPhaseStarting
-		conditions.SetCondition(&cluster.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonPowerTransitioning, "Runner machines are starting or waiting for API readiness")
+		conditions.SetConditionWithGeneration(&cluster.Status.Conditions, cluster.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonPowerTransitioning, "Runner machines are starting or waiting for API readiness")
 	} else {
 		cluster.Status.Phase = ghav1alpha1.RunnerClusterPhaseDegraded
-		conditions.SetCondition(&cluster.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, "Runner cluster is degraded (machine is on but API is unreachable)")
+		conditions.SetConditionWithGeneration(&cluster.Status.Conditions, cluster.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, "Runner cluster is degraded (machine is on but API is unreachable)")
 	}
 }
 

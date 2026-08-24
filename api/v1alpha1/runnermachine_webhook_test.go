@@ -30,8 +30,8 @@ func TestRunnerMachineDefaulting(t *testing.T) {
 		Namespace: "default",
 		Spec: RunnerMachineSpec{
 			ClusterRef:         corev1.LocalObjectReference{Name: "test-cluster"},
-			KubernetesNodeName: "node-1",
-			Capacity:           RunnerMachineCapacity{Runners: 4},
+			NodeName: "node-1",
+			Capacity:           RunnerMachineCapacity{RunnerSlots: 4},
 			Redfish: RedfishSpec{
 				Endpoint:             "https://192.168.1.100",
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
@@ -43,17 +43,17 @@ func TestRunnerMachineDefaulting(t *testing.T) {
 		t.Fatalf("Default() error = %v", err)
 	}
 
-	if m.Spec.Priority != 100 {
-		t.Errorf("expected default priority 100, got %d", m.Spec.Priority)
+	if m.Spec.PowerPolicy != RunnerMachinePowerPolicyOnDemand {
+		t.Errorf("expected default powerPolicy OnDemand, got %q", m.Spec.PowerPolicy)
 	}
 	if m.Spec.Redfish.SystemID != "1" {
 		t.Errorf("expected default systemID '1', got %q", m.Spec.Redfish.SystemID)
 	}
-	if m.Spec.Redfish.Power.ShutdownTimeout == nil || m.Spec.Redfish.Power.ShutdownTimeout.Duration != 3*time.Minute {
-		t.Errorf("expected default shutdownTimeout 3m, got %v", m.Spec.Redfish.Power.ShutdownTimeout)
+	if m.Spec.Redfish.Power.Shutdown.Timeout == nil || m.Spec.Redfish.Power.Shutdown.Timeout.Duration != 3*time.Minute {
+		t.Errorf("expected default shutdown timeout 3m, got %v", m.Spec.Redfish.Power.Shutdown.Timeout)
 	}
-	if m.Spec.Redfish.Power.ForceOffAfter == nil || m.Spec.Redfish.Power.ForceOffAfter.Duration != 0 {
-		t.Errorf("expected default forceOffAfter 0, got %v", m.Spec.Redfish.Power.ForceOffAfter)
+	if m.Spec.Redfish.Power.Shutdown.TimeoutPolicy != RedfishTimeoutPolicyAbort {
+		t.Errorf("expected default timeoutPolicy Abort, got %v", m.Spec.Redfish.Power.Shutdown.TimeoutPolicy)
 	}
 }
 
@@ -76,16 +76,16 @@ func TestRunnerMachineValidateCreate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "empty kubernetesNodeName",
+			name: "empty nodeName",
 			mutate: func(m *RunnerMachine) {
-				m.Spec.KubernetesNodeName = ""
+				m.Spec.NodeName = ""
 			},
 			wantErr: true,
 		},
 		{
-			name: "capacity runners < 1",
+			name: "capacity runnerSlots < 1",
 			mutate: func(m *RunnerMachine) {
-				m.Spec.Capacity.Runners = 0
+				m.Spec.Capacity.RunnerSlots = 0
 			},
 			wantErr: true,
 		},
@@ -112,8 +112,8 @@ func TestRunnerMachineValidateCreate(t *testing.T) {
 				Namespace: "default",
 				Spec: RunnerMachineSpec{
 					ClusterRef:         corev1.LocalObjectReference{Name: "test-cluster"},
-					KubernetesNodeName: "node-1",
-					Capacity:           RunnerMachineCapacity{Runners: 4},
+					NodeName: "node-1",
+					Capacity:           RunnerMachineCapacity{RunnerSlots: 4},
 					Redfish: RedfishSpec{
 						Endpoint:             "https://192.168.1.100",
 						CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
@@ -136,8 +136,8 @@ func TestRunnerMachineValidateUpdate(t *testing.T) {
 		Namespace: "default",
 		Spec: RunnerMachineSpec{
 			ClusterRef:         corev1.LocalObjectReference{Name: "test-cluster"},
-			KubernetesNodeName: "node-1",
-			Capacity:           RunnerMachineCapacity{Runners: 4},
+			NodeName: "node-1",
+			Capacity:           RunnerMachineCapacity{RunnerSlots: 4},
 			Redfish: RedfishSpec{
 				Endpoint:             "https://192.168.1.100",
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
@@ -147,7 +147,7 @@ func TestRunnerMachineValidateUpdate(t *testing.T) {
 
 	t.Run("valid update", func(t *testing.T) {
 		newMachine := oldMachine.DeepCopy()
-		newMachine.Spec.Capacity.Runners = 8
+		newMachine.Spec.Capacity.RunnerSlots = 8
 		_, err := newMachine.ValidateUpdate(context.Background(), oldMachine, newMachine)
 		if err != nil {
 			t.Errorf("expected valid update, got error: %v", err)
@@ -163,12 +163,12 @@ func TestRunnerMachineValidateUpdate(t *testing.T) {
 		}
 	})
 
-	t.Run("immutable kubernetesNodeName modified", func(t *testing.T) {
+	t.Run("immutable nodeName modified", func(t *testing.T) {
 		newMachine := oldMachine.DeepCopy()
-		newMachine.Spec.KubernetesNodeName = "other-node"
+		newMachine.Spec.NodeName = "other-node"
 		_, err := newMachine.ValidateUpdate(context.Background(), oldMachine, newMachine)
 		if err == nil {
-			t.Errorf("expected error modifying immutable kubernetesNodeName, got nil")
+			t.Errorf("expected error modifying immutable nodeName, got nil")
 		}
 	})
 }

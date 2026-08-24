@@ -4,7 +4,9 @@ import (
 	"context"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/actions/scaleset"
 	"github.com/actions/scaleset/listener"
@@ -12,6 +14,46 @@ import (
 	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/githubscaleset"
 	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/redfish"
 )
+
+func setupFakeClientBuilder(scheme *runtime.Scheme) *fake.ClientBuilder {
+	return fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithIndex(&ghav1alpha1.EphemeralRunner{}, IndexScaleSetRefName, func(obj client.Object) []string {
+			er, ok := obj.(*ghav1alpha1.EphemeralRunner)
+			if !ok || er.Spec.ScaleSetRef.Name == "" {
+				return nil
+			}
+			return []string{er.Spec.ScaleSetRef.Name}
+		}).
+		WithIndex(&ghav1alpha1.EphemeralRunnerSet{}, IndexScaleSetRefName, func(obj client.Object) []string {
+			ers, ok := obj.(*ghav1alpha1.EphemeralRunnerSet)
+			if !ok || ers.Spec.ScaleSetRef.Name == "" {
+				return nil
+			}
+			return []string{ers.Spec.ScaleSetRef.Name}
+		}).
+		WithIndex(&ghav1alpha1.RunnerScaleSet{}, IndexNodePoolRefName, func(obj client.Object) []string {
+			ss, ok := obj.(*ghav1alpha1.RunnerScaleSet)
+			if !ok || ss.Spec.NodePoolRef.Name == "" {
+				return nil
+			}
+			return []string{ss.Spec.NodePoolRef.Name}
+		}).
+		WithIndex(&ghav1alpha1.RunnerMachine{}, IndexMachineNodePoolRefName, func(obj client.Object) []string {
+			rm, ok := obj.(*ghav1alpha1.RunnerMachine)
+			if !ok || rm.Spec.NodePoolRef == nil || rm.Spec.NodePoolRef.Name == "" {
+				return nil
+			}
+			return []string{rm.Spec.NodePoolRef.Name}
+		}).
+		WithIndex(&ghav1alpha1.RunnerMachine{}, IndexClusterRefName, func(obj client.Object) []string {
+			rm, ok := obj.(*ghav1alpha1.RunnerMachine)
+			if !ok || rm.Spec.ClusterRef.Name == "" {
+				return nil
+			}
+			return []string{rm.Spec.ClusterRef.Name}
+		})
+}
 
 type fakeRemoteProvider struct {
 	client    client.Client

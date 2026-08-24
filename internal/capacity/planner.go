@@ -9,7 +9,8 @@ type MachineCapacity struct {
 	Machine           *ghav1alpha1.RunnerMachine
 	Capacity          int
 	Priority          int32
-	Bootstrap         bool
+	StartupRequired   bool
+	AlwaysOn          bool
 	PoweredOn         bool
 	Ready             bool
 	PowerManageable   bool
@@ -27,11 +28,11 @@ type Plan struct {
 	// TotalCapacity is the sum of runner capacities from selected machines.
 	TotalCapacity int
 
-	// BootstrapRequired indicates whether a bootstrap machine is included in the selection.
-	BootstrapRequired bool
+	// StartupRequired indicates whether a startup machine is included in the selection.
+	StartupRequired bool
 
-	// BootstrapUnavailable indicates whether the required bootstrap machine is quarantined or unavailable.
-	BootstrapUnavailable bool
+	// StartupUnavailable indicates whether the required startup machine is quarantined or unavailable.
+	StartupUnavailable bool
 
 	// MultiNodeViolated indicates if multi-node pool was encountered when MultiNode feature is disabled.
 	MultiNodeViolated bool

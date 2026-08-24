@@ -45,6 +45,10 @@ type EphemeralRunnerSpec struct {
 	// +kubebuilder:validation:Required
 	ScaleSetRef corev1.LocalObjectReference `json:"scaleSetRef"`
 
+	// RunnerSetRef optionally references the managing EphemeralRunnerSet.
+	// +optional
+	RunnerSetRef *corev1.LocalObjectReference `json:"runnerSetRef,omitempty"`
+
 	// RunnerName is the unique name of this runner instance registered in GitHub Actions and used for the remote Pod.
 	// +kubebuilder:validation:Required
 	RunnerName string `json:"runnerName"`
@@ -148,6 +152,10 @@ type RunnerFailureStatus struct {
 
 // EphemeralRunnerStatus defines the observed state of EphemeralRunner.
 type EphemeralRunnerStatus struct {
+	// ObservedGeneration is the most recent generation observed for this resource.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// Phase is the current execution phase of the ephemeral runner.
 	// +kubebuilder:default="Pending"
 	// +optional

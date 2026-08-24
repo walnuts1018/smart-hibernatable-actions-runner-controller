@@ -1,32 +1,88 @@
 name: Release
+run-name: Release ${{ inputs.release_tag || 'next patch' }}
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release Tag (e.g. v1.2.3). Empty uses the next patch tag after the latest stable vX.Y.Z tag (or v0.1.0)."
+        required: false
+        type: string
+      release_type:
+        description: GitHub Release type
+        required: true
+        default: latest
+        type: choice
+        options:
+          - none
+          - pre-release
+          - latest
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
+concurrency:
+  group: release-${{ inputs.release_tag || github.run_id }}
+  cancel-in-progress: false
+
 jobs:
-  determine-tag:
+  validate:
+    name: Validate release target
     runs-on: ubuntu-latest
     outputs:
-      release_tag: ${{ steps.tag.outputs.release_tag }}
+      release_tag: ${{ steps.release-target.outputs.release_tag }}
     steps:
-      - id: tag
-        shell: bash
+      - name: Check out release tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Resolve and validate tag
+        id: release-target
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "release_tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-          else
-            echo "release_tag=latest" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          if [ -z "$RELEASE_TAG" ]; then
+            latest_tag="$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+            if [ -z "$latest_tag" ]; then
+              RELEASE_TAG="v0.1.0"
+            else
+              version="${latest_tag#v}"
+              IFS=. read -r major minor patch <<< "$version"
+              RELEASE_TAG="v${major}.${minor}.$((patch + 1))"
+            fi
           fi
 
-  release-artifacts:
-    needs: determine-tag
+          [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ ]]
+          [ "$RELEASE_TAG" != latest ]
+          git check-ref-format --allow-onelevel "refs/tags/$RELEASE_TAG"
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+  artifacts:
+    name: Build release artifacts
+    needs: [validate]
     uses: ./.github/workflows/release-artifacts.yaml
     with:
       revision: ${{ github.sha }}
-      release_tag: ${{ needs.determine-tag.outputs.release_tag }}
+      release_tag: ${{ needs.validate.outputs.release_tag }}
+    secrets: inherit
+
+  publish:
+    name: Create GitHub Release
+    needs: [validate, artifacts]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create release
+        if: inputs.release_type != 'none'
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ needs.validate.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          prerelease: ${{ inputs.release_type == 'pre-release' }}
+          make_latest: ${{ inputs.release_type == 'latest' }}

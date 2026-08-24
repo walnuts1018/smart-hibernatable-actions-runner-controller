@@ -11,7 +11,6 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/capacity"
@@ -24,6 +23,13 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name: "c1", Namespace: "default",
+		Spec: ghav1alpha1.RunnerClusterSpec{
+			Startup: &ghav1alpha1.RunnerClusterStartupSpec{
+				MachineRefs: []corev1.LocalObjectReference{
+					{Name: "m1"},
+				},
+			},
+		},
 	}
 
 	machine1 := &ghav1alpha1.RunnerMachine{
@@ -32,11 +38,11 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 		UID:       "uid-m1",
 		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
-			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
-			KubernetesNodeName: "node1",
-			Capacity:           ghav1alpha1.RunnerMachineCapacity{Runners: 2},
-			Bootstrap:          true,
-			Priority:           100,
+			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
+			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
+			NodeName:    "node1",
+			Capacity:    ghav1alpha1.RunnerMachineCapacity{RunnerSlots: 2},
+			Priority:    100,
 		},
 		Status: ghav1alpha1.RunnerMachineStatus{
 			PowerState: ghav1alpha1.PowerStateOff,
@@ -49,11 +55,11 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 		UID:       "uid-m2",
 		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
-			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
-			KubernetesNodeName: "node2",
-			Capacity:           ghav1alpha1.RunnerMachineCapacity{Runners: 2},
-			Bootstrap:          false,
-			Priority:           200,
+			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
+			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
+			NodeName:    "node2",
+			Capacity:    ghav1alpha1.RunnerMachineCapacity{RunnerSlots: 2},
+			Priority:    200,
 		},
 		Status: ghav1alpha1.RunnerMachineStatus{
 			PowerState: ghav1alpha1.PowerStateOn,
@@ -64,9 +70,6 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
-			MachineSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{"pool": "p1"},
-			},
 		},
 	}
 
@@ -77,7 +80,6 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 			NodePoolRef: corev1.LocalObjectReference{Name: "p1"},
 		},
 		Status: ghav1alpha1.RunnerScaleSetStatus{
-			DesiredRunners: 2,
 			GitHub: ghav1alpha1.GitHubStatisticsStatus{
 				AssignedJobs:       2,
 				LastStatisticsTime: &now,
@@ -85,10 +87,19 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 		},
 	}
 
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(cluster, machine1, machine2, nodePool, scaleSet).
-		WithStatusSubresource(machine1, machine2, nodePool, scaleSet).
+	two := int32(2)
+	ers := &ghav1alpha1.EphemeralRunnerSet{
+		Name:      "ss1",
+		Namespace: "default",
+		Spec: ghav1alpha1.EphemeralRunnerSetSpec{
+			ScaleSetRef: corev1.LocalObjectReference{Name: "ss1"},
+			Replicas:    &two,
+		},
+	}
+
+	fakeClient := setupFakeClientBuilder(scheme).
+		WithObjects(cluster, machine1, machine2, nodePool, scaleSet, ers).
+		WithStatusSubresource(machine1, machine2, nodePool, scaleSet, ers).
 		Build()
 
 	planner := capacity.NewOrderedCapacityPlanner(true) // multi-node enabled
@@ -102,7 +113,7 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 		EnableMultiNode: true,
 	}
 
-	// 1. 需要2の場合（Bootstrapであるm1がActive、m2がOffとして計画される）
+	// 1. 需要2の場合（Startupであるm1がActive、m2がOffとして計画される）
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
 		Namespace: "default", Name: "p1",
 	})
@@ -138,14 +149,15 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 		t.Errorf("expected m2 to have DrainStartedAt recorded")
 	}
 
-	// 2. 需要が0になった場合（m1もm2もOffとして計画され、IdleSinceが開始される）
-	var currentSS ghav1alpha1.RunnerScaleSet
-	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "ss1"}, &currentSS); err != nil {
-		t.Fatalf("failed to get current scale set: %v", err)
+	// 2. 需要が0になった場合（m1はstartup保持、m2はOffとして計画され、IdleSinceが開始される）
+	var currentERS ghav1alpha1.EphemeralRunnerSet
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "ss1"}, &currentERS); err != nil {
+		t.Fatalf("failed to get current ERS: %v", err)
 	}
-	currentSS.Status.DesiredRunners = 0
-	if err := fakeClient.Status().Update(context.Background(), &currentSS); err != nil {
-		t.Fatalf("failed to update scale set status: %v", err)
+	zero := int32(0)
+	currentERS.Spec.Replicas = &zero
+	if err := fakeClient.Update(context.Background(), &currentERS); err != nil {
+		t.Fatalf("failed to update ERS: %v", err)
 	}
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
@@ -159,17 +171,8 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 		t.Fatalf("failed to get updated pool: %v", err)
 	}
 
-	if updatedPool.Status.DesiredNodes != 0 {
-		t.Errorf("expected DesiredNodes=0, got %d", updatedPool.Status.DesiredNodes)
-	}
 	if updatedPool.Status.IdleSince == nil {
 		t.Errorf("expected IdleSince to be set when demand dropped to zero")
-	}
-
-	for _, p := range updatedPool.Status.DesiredMachines {
-		if p.DesiredState != ghav1alpha1.MachineDesiredStateOff {
-			t.Errorf("expected machine %s to be Off, got %s", p.Name, p.DesiredState)
-		}
 	}
 }
 
@@ -187,10 +190,10 @@ func TestRunnerNodePoolReconciler_MultiNodeDisabledViolation(t *testing.T) {
 		Namespace: "default",
 		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
-			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
-			KubernetesNodeName: "node1",
-			Capacity:           ghav1alpha1.RunnerMachineCapacity{Runners: 2},
-			Bootstrap:          true,
+			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
+			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
+			NodeName:    "node1",
+			Capacity:    ghav1alpha1.RunnerMachineCapacity{RunnerSlots: 2},
 		},
 	}
 	machine2 := &ghav1alpha1.RunnerMachine{
@@ -198,9 +201,10 @@ func TestRunnerNodePoolReconciler_MultiNodeDisabledViolation(t *testing.T) {
 		Namespace: "default",
 		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
-			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
-			KubernetesNodeName: "node2",
-			Capacity:           ghav1alpha1.RunnerMachineCapacity{Runners: 2},
+			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
+			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
+			NodeName:    "node2",
+			Capacity:    ghav1alpha1.RunnerMachineCapacity{RunnerSlots: 2},
 		},
 	}
 
@@ -208,26 +212,32 @@ func TestRunnerNodePoolReconciler_MultiNodeDisabledViolation(t *testing.T) {
 		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
-			MachineSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{"pool": "p1"},
-			},
 		},
 	}
 
+	two := int32(2)
 	scaleSet := &ghav1alpha1.RunnerScaleSet{
 		Name: "ss1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
 			NodePoolRef: corev1.LocalObjectReference{Name: "p1"},
-		},
-		Status: ghav1alpha1.RunnerScaleSetStatus{
-			DesiredRunners: 2,
+			Scaling: ghav1alpha1.RunnerScaleSetScalingSpec{
+				MaxRunners: &two,
+			},
 		},
 	}
 
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(cluster, machine1, machine2, nodePool, scaleSet).
-		WithStatusSubresource(machine1, machine2, nodePool, scaleSet).
+	ers := &ghav1alpha1.EphemeralRunnerSet{
+		Name:      "ss1",
+		Namespace: "default",
+		Spec: ghav1alpha1.EphemeralRunnerSetSpec{
+			ScaleSetRef: corev1.LocalObjectReference{Name: "ss1"},
+			Replicas:    &two,
+		},
+	}
+
+	fakeClient := setupFakeClientBuilder(scheme).
+		WithObjects(cluster, machine1, machine2, nodePool, scaleSet, ers).
+		WithStatusSubresource(machine1, machine2, nodePool, scaleSet, ers).
 		Build()
 
 	planner := capacity.NewOrderedCapacityPlanner(false) // multi-node disabled

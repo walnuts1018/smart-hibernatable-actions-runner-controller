@@ -35,7 +35,7 @@ func TestRunnerClusterReconciler(t *testing.T) {
 		Namespace: "default",
 		Spec: ghav1alpha1.RunnerMachineSpec{
 			ClusterRef:         corev1.LocalObjectReference{Name: "test-cluster"},
-			KubernetesNodeName: "node1",
+			NodeName: "node1",
 		},
 		Status: ghav1alpha1.RunnerMachineStatus{
 			PowerState: ghav1alpha1.PowerStateOn,

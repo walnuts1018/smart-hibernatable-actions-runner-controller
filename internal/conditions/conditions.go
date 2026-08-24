@@ -87,7 +87,8 @@ const (
 	ReasonQuarantined             = "Quarantined"
 	ReasonClusterIdentityMismatch = "ClusterIdentityMismatch"
 	ReasonMachineIDMismatch       = "MachineIDMismatch"
-	ReasonBootstrapUnavailable    = "BootstrapUnavailable"
+	ReasonStartupUnavailable      = "StartupUnavailable"
+	ReasonBootstrapUnavailable    = "StartupUnavailable" // for backward compatibility
 )
 
 // SetCondition adds or updates a condition in a slice of conditions.

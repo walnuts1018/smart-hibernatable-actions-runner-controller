@@ -43,10 +43,10 @@ func TestRunnerMachineReconciler_ScaleFromZero_PowerOnAndUncordon(t *testing.T) 
 		UID:       "machine-uid-1",
 		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
-			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
-			KubernetesNodeName: "node1",
-			Capacity:           ghav1alpha1.RunnerMachineCapacity{Runners: 2},
-			Bootstrap:          true,
+			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
+			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
+			NodeName:    "node1",
+			Capacity:    ghav1alpha1.RunnerMachineCapacity{RunnerSlots: 2},
 			Redfish: ghav1alpha1.RedfishSpec{
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
 			},
@@ -60,9 +60,6 @@ func TestRunnerMachineReconciler_ScaleFromZero_PowerOnAndUncordon(t *testing.T) 
 		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
-			MachineSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{"pool": "p1"},
-			},
 		},
 		Status: ghav1alpha1.RunnerNodePoolStatus{
 			DesiredMachines: []ghav1alpha1.MachinePlanStatus{
@@ -172,10 +169,10 @@ func TestRunnerMachineReconciler_ScaleDown_DrainingAndShutdown(t *testing.T) {
 		UID:       "machine-uid-1",
 		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
-			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
-			KubernetesNodeName: "node1",
-			Capacity:           ghav1alpha1.RunnerMachineCapacity{Runners: 2},
-			Bootstrap:          true,
+			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
+			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
+			NodeName:    "node1",
+			Capacity:    ghav1alpha1.RunnerMachineCapacity{RunnerSlots: 2},
 			Redfish: ghav1alpha1.RedfishSpec{
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
 			},
@@ -190,9 +187,6 @@ func TestRunnerMachineReconciler_ScaleDown_DrainingAndShutdown(t *testing.T) {
 		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
-			MachineSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{"pool": "p1"},
-			},
 			Scaling: ghav1alpha1.RunnerNodePoolScalingSpec{
 				ScaleDownDelay: &metav1.Duration{Duration: 10 * time.Minute},
 			},
@@ -316,10 +310,10 @@ func TestRunnerMachineReconciler_ExternalCordonProtection(t *testing.T) {
 		UID:       "machine-uid-1",
 		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
-			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
-			KubernetesNodeName: "node1",
-			Capacity:           ghav1alpha1.RunnerMachineCapacity{Runners: 2},
-			Bootstrap:          true,
+			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
+			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
+			NodeName:    "node1",
+			Capacity:    ghav1alpha1.RunnerMachineCapacity{RunnerSlots: 2},
 			Redfish: ghav1alpha1.RedfishSpec{
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
 			},
@@ -333,9 +327,6 @@ func TestRunnerMachineReconciler_ExternalCordonProtection(t *testing.T) {
 		Name: "p1", Namespace: "default",
 		Spec: ghav1alpha1.RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
-			MachineSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{"pool": "p1"},
-			},
 		},
 		Status: ghav1alpha1.RunnerNodePoolStatus{
 			DesiredMachines: []ghav1alpha1.MachinePlanStatus{
@@ -455,10 +446,10 @@ func TestRunnerMachineReconciler_MachineIDMismatchAndExplicitAdoption(t *testing
 		UID:       "machine-uid-1",
 		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
-			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
-			KubernetesNodeName: "node1",
-			Capacity:           ghav1alpha1.RunnerMachineCapacity{Runners: 2},
-			Bootstrap:          true,
+			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
+			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
+			NodeName:    "node1",
+			Capacity:    ghav1alpha1.RunnerMachineCapacity{RunnerSlots: 2},
 			Redfish: ghav1alpha1.RedfishSpec{
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
 			},
@@ -594,10 +585,10 @@ func TestRunnerMachineReconciler_RedfishCircuitBreaker(t *testing.T) {
 		UID:       "machine-uid-1",
 		Labels:    map[string]string{"pool": "p1"},
 		Spec: ghav1alpha1.RunnerMachineSpec{
-			ClusterRef:         corev1.LocalObjectReference{Name: "c1"},
-			KubernetesNodeName: "node1",
-			Capacity:           ghav1alpha1.RunnerMachineCapacity{Runners: 2},
-			Bootstrap:          true,
+			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
+			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
+			NodeName:    "node1",
+			Capacity:    ghav1alpha1.RunnerMachineCapacity{RunnerSlots: 2},
 			Redfish: ghav1alpha1.RedfishSpec{
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
 			},

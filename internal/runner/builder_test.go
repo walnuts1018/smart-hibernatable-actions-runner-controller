@@ -36,8 +36,6 @@ func TestBuildRunnerPod(t *testing.T) {
 		UID:  "scaleset-uid-123",
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
 			Runner: ghav1alpha1.RunnerTemplateSpec{
-				ContainerName: "runner",
-				WorkDir:       "_work",
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{

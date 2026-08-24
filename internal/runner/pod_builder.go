@@ -25,10 +25,7 @@ func BuildRunnerPod(namespace string, scaleSet *ghav1alpha1.RunnerScaleSet, runn
 		podSpec.EnableServiceLinks = &f
 	}
 
-	targetContainerName := scaleSet.Spec.Runner.ContainerName
-	if targetContainerName == "" {
-		targetContainerName = DefaultContainerName
-	}
+	targetContainerName := DefaultContainerName
 
 	jitSecretName := JitSecretName(runner.Spec.RunnerName)
 	jitEnvVar := corev1.EnvVar{

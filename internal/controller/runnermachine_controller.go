@@ -11,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/events"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -53,6 +52,7 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	origMachine := machine.DeepCopy()
+	machine.Status.ObservedGeneration = machine.Generation
 
 	// 0. Redfish Circuit Breaker 判定 (BMC無応答時のBackoff)
 	var skipRedfish bool
@@ -69,7 +69,7 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	var cluster ghav1alpha1.RunnerCluster
 	if err := r.Get(ctx, client.ObjectKey{Namespace: machine.Namespace, Name: machine.Spec.ClusterRef.Name}, &cluster); err != nil {
 		log.Error(err, "failed to get cluster for machine", "cluster", machine.Spec.ClusterRef.Name)
-		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, fmt.Sprintf("Cluster %s not found: %v", machine.Spec.ClusterRef.Name, err))
+		conditions.SetConditionWithGeneration(&machine.Status.Conditions, machine.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, fmt.Sprintf("Cluster %s not found: %v", machine.Spec.ClusterRef.Name, err))
 		if updateErr := r.updateStatus(ctx, &machine, origMachine); updateErr != nil {
 			log.Error(updateErr, "failed to update status")
 		}
@@ -77,7 +77,7 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// 2. 所属するRunnerNodePoolからDesiredStateとDrain開始時刻を取得
-	desiredState, drainStartedAt, nodePool, err := r.getDesiredState(ctx, &machine)
+	desiredState, drainStartedAt, nodePool, err := r.getDesiredState(ctx, &machine, &cluster)
 	if err != nil {
 		log.Error(err, "failed to get desired state from node pool")
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
@@ -112,13 +112,13 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// 6. Overall Ready Condition の設定
 	if machine.Spec.Maintenance != nil && machine.Spec.Maintenance.Enabled {
-		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonMaintenance, "Machine is under maintenance")
+		conditions.SetConditionWithGeneration(&machine.Status.Conditions, machine.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonMaintenance, "Machine is under maintenance")
 	} else if machine.Status.PowerState == ghav1alpha1.PowerStateOn && machine.Status.Kubernetes.Ready {
-		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeReady, metav1.ConditionTrue, conditions.ReasonReady, "Machine is powered on and Node is Ready")
+		conditions.SetConditionWithGeneration(&machine.Status.Conditions, machine.Generation, conditions.TypeReady, metav1.ConditionTrue, conditions.ReasonReady, "Machine is powered on and Node is Ready")
 	} else if machine.Status.PowerState == ghav1alpha1.PowerStateOff && desiredState == ghav1alpha1.MachineDesiredStateOff {
-		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeReady, metav1.ConditionTrue, conditions.ReasonScaledToZero, "Machine is powered off (scaled to zero)")
+		conditions.SetConditionWithGeneration(&machine.Status.Conditions, machine.Generation, conditions.TypeReady, metav1.ConditionTrue, conditions.ReasonScaledToZero, "Machine is powered off (scaled to zero)")
 	} else {
-		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, "Machine is not fully ready")
+		conditions.SetConditionWithGeneration(&machine.Status.Conditions, machine.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, "Machine is not fully ready")
 	}
 
 	// メトリクス更新
@@ -199,21 +199,21 @@ func (r *RunnerMachineReconciler) observeRemoteNode(
 	if !cluster.Status.APIReachable {
 		machine.Status.Kubernetes.Present = false
 		machine.Status.Kubernetes.Ready = false
-		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeKubernetesNodeReady, metav1.ConditionFalse, conditions.ReasonAPIUnreachable, "Cluster API unreachable")
+		conditions.SetConditionWithGeneration(&machine.Status.Conditions, machine.Generation, conditions.TypeKubernetesNodeReady, metav1.ConditionFalse, conditions.ReasonAPIUnreachable, "Cluster API unreachable")
 		return nil, nil, nil
 	}
 
-	node, err := r.RemoteProvider.GetNode(ctx, cluster, machine.Spec.KubernetesNodeName)
+	node, err := r.RemoteProvider.GetNode(ctx, cluster, machine.Spec.NodeName)
 	if err != nil {
 		machine.Status.Kubernetes.Present = false
 		machine.Status.Kubernetes.Ready = false
-		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeKubernetesNodeReady, metav1.ConditionFalse, conditions.ReasonNodeNotFound, fmt.Sprintf("Failed to get node: %v", err))
+		conditions.SetConditionWithGeneration(&machine.Status.Conditions, machine.Generation, conditions.TypeKubernetesNodeReady, metav1.ConditionFalse, conditions.ReasonNodeNotFound, fmt.Sprintf("Failed to get node: %v", err))
 		return nil, nil, err
 	}
 	if node == nil {
 		machine.Status.Kubernetes.Present = false
 		machine.Status.Kubernetes.Ready = false
-		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeKubernetesNodeReady, metav1.ConditionFalse, conditions.ReasonNodeNotFound, "Kubernetes node not found")
+		conditions.SetConditionWithGeneration(&machine.Status.Conditions, machine.Generation, conditions.TypeKubernetesNodeReady, metav1.ConditionFalse, conditions.ReasonNodeNotFound, "Kubernetes node not found")
 		return nil, nil, nil
 	}
 
@@ -247,7 +247,7 @@ func (r *RunnerMachineReconciler) observeRemoteNode(
 		machine.Status.Kubernetes.MachineID = currentMID
 		machine.Status.Kubernetes.NodeUID = currentUID
 		machine.Status.Kubernetes.ObservedMachineID = currentMID
-		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeIdentityValid, metav1.ConditionTrue, conditions.ReasonReady, "Machine identity bound")
+		conditions.SetConditionWithGeneration(&machine.Status.Conditions, machine.Generation, conditions.TypeIdentityValid, metav1.ConditionTrue, conditions.ReasonReady, "Machine identity bound")
 
 	case currentMID != "" && machine.Status.Kubernetes.BoundMachineID != currentMID:
 		// MachineID mismatch: 期待値を上書きせず、IdentityValid=False に倒して mutation/capacity をブロック
@@ -260,11 +260,11 @@ func (r *RunnerMachineReconciler) observeRemoteNode(
 				"Node %s has different machineID %s (expected %s); mutation blocked until explicit adoption",
 				node.Name, currentMID, machine.Status.Kubernetes.BoundMachineID)
 		}
-		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeIdentityValid, metav1.ConditionFalse,
+		conditions.SetConditionWithGeneration(&machine.Status.Conditions, machine.Generation, conditions.TypeIdentityValid, metav1.ConditionFalse,
 			conditions.ReasonMachineIDMismatch, fmt.Sprintf("expected machineID %q, observed %q", machine.Status.Kubernetes.BoundMachineID, currentMID))
-		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeKubernetesNodeReady, metav1.ConditionFalse,
+		conditions.SetConditionWithGeneration(&machine.Status.Conditions, machine.Generation, conditions.TypeKubernetesNodeReady, metav1.ConditionFalse,
 			conditions.ReasonMachineIDMismatch, "Node machine identity mismatch")
-		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse,
+		conditions.SetConditionWithGeneration(&machine.Status.Conditions, machine.Generation, conditions.TypeReady, metav1.ConditionFalse,
 			conditions.ReasonMachineIDMismatch, "Node identity invalid")
 		if updateErr := r.updateStatus(ctx, machine, origMachine); updateErr != nil {
 			log.Error(updateErr, "failed to update status")
@@ -277,14 +277,14 @@ func (r *RunnerMachineReconciler) observeRemoteNode(
 		// 同一 MachineID: Node 再作成の場合は NodeUID のみを更新
 		machine.Status.Kubernetes.NodeUID = currentUID
 		machine.Status.Kubernetes.ObservedMachineID = currentMID
-		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeIdentityValid, metav1.ConditionTrue, conditions.ReasonReady, "Machine identity valid")
+		conditions.SetConditionWithGeneration(&machine.Status.Conditions, machine.Generation, conditions.TypeIdentityValid, metav1.ConditionTrue, conditions.ReasonReady, "Machine identity valid")
 	}
 
 	machine.Status.Kubernetes.Ready = remotecluster.IsNodeReady(node)
 	if machine.Status.Kubernetes.Ready {
-		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeKubernetesNodeReady, metav1.ConditionTrue, conditions.ReasonNodeReady, "Kubernetes node is Ready")
+		conditions.SetConditionWithGeneration(&machine.Status.Conditions, machine.Generation, conditions.TypeKubernetesNodeReady, metav1.ConditionTrue, conditions.ReasonNodeReady, "Kubernetes node is Ready")
 	} else {
-		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeKubernetesNodeReady, metav1.ConditionFalse, conditions.ReasonNodeNotReady, "Kubernetes node is NotReady")
+		conditions.SetConditionWithGeneration(&machine.Status.Conditions, machine.Generation, conditions.TypeKubernetesNodeReady, metav1.ConditionFalse, conditions.ReasonNodeNotReady, "Kubernetes node is NotReady")
 		// 電源ON状態が継続しているのにNodeがReadyにならない場合、Quarantine判定
 		nodeReadyTimeout := 10 * time.Minute
 		if cluster.Spec.Readiness.NodeReadyTimeout != nil && cluster.Spec.Readiness.NodeReadyTimeout.Duration > 0 {
@@ -298,7 +298,7 @@ func (r *RunnerMachineReconciler) observeRemoteNode(
 					Since:               now,
 					ConsecutiveFailures: 1,
 				}
-				conditions.SetCondition(&machine.Status.Conditions, conditions.TypeQuarantined, metav1.ConditionTrue, conditions.ReasonQuarantined, fmt.Sprintf("Node failed to become Ready within %s", nodeReadyTimeout))
+				conditions.SetConditionWithGeneration(&machine.Status.Conditions, machine.Generation, conditions.TypeQuarantined, metav1.ConditionTrue, conditions.ReasonQuarantined, fmt.Sprintf("Node failed to become Ready within %s", nodeReadyTimeout))
 				if r.Recorder != nil {
 					r.Recorder.Eventf(machine, nil, corev1.EventTypeWarning, "MachineQuarantined", "Reconcile", "Machine %s quarantined: Node failed to become Ready within %s", machine.Name, nodeReadyTimeout)
 				}
@@ -362,7 +362,7 @@ func (r *RunnerMachineReconciler) reconcileMaintenance(
 ) time.Duration {
 	log := logf.FromContext(ctx)
 	log.Info("machine is in maintenance mode", "machine", m.Name)
-	conditions.SetCondition(&m.Status.Conditions, conditions.TypeMaintenance, metav1.ConditionTrue, conditions.ReasonMaintenance, "Machine is under maintenance")
+	conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeMaintenance, metav1.ConditionTrue, conditions.ReasonMaintenance, "Machine is under maintenance")
 
 	// 1. ノードを Cordon して新規ジョブ割り当てを阻止
 	if remoteNode != nil {
@@ -372,7 +372,7 @@ func (r *RunnerMachineReconciler) reconcileMaintenance(
 	}
 
 	// 2. 実行中 Pod を確認
-	activePods, err := r.countActiveRunnerPodsOnNode(ctx, cluster, m.Spec.KubernetesNodeName)
+	activePods, err := r.countActiveRunnerPodsOnNode(ctx, cluster, m.Spec.NodeName)
 	if err != nil {
 		log.Error(err, "failed to count active runner pods during maintenance reconciliation")
 		return 5 * time.Second
@@ -380,7 +380,7 @@ func (r *RunnerMachineReconciler) reconcileMaintenance(
 
 	if activePods > 0 {
 		log.Info("waiting for active runner pods to finish before maintenance ready", "machine", m.Name, "activePods", activePods)
-		conditions.SetCondition(&m.Status.Conditions, conditions.TypeMaintenanceReady, metav1.ConditionFalse, conditions.ReasonDraining, fmt.Sprintf("Waiting for %d runner pods to finish", activePods))
+		conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeMaintenanceReady, metav1.ConditionFalse, conditions.ReasonDraining, fmt.Sprintf("Waiting for %d runner pods to finish", activePods))
 		return 5 * time.Second
 	}
 
@@ -394,12 +394,12 @@ func (r *RunnerMachineReconciler) reconcileMaintenance(
 		if m.Status.Operation == nil || m.Status.Operation.Type != ghav1alpha1.PowerOperationTypeGracefulShutdown {
 			r.initiateGracefulShutdown(ctx, m, pwrCtrl)
 		}
-		conditions.SetCondition(&m.Status.Conditions, conditions.TypeMaintenanceReady, metav1.ConditionFalse, conditions.ReasonPowerTransitioning, "Powering off machine for maintenance")
+		conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeMaintenanceReady, metav1.ConditionFalse, conditions.ReasonPowerTransitioning, "Powering off machine for maintenance")
 		return 5 * time.Second
 	}
 
 	// 4. Maintenance Ready 完了
-	conditions.SetCondition(&m.Status.Conditions, conditions.TypeMaintenanceReady, metav1.ConditionTrue, "Ready", "Machine is drained and ready for maintenance")
+	conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeMaintenanceReady, metav1.ConditionTrue, "Ready", "Machine is drained and ready for maintenance")
 	return 1 * time.Minute
 }
 
@@ -441,7 +441,7 @@ func (r *RunnerMachineReconciler) reconcileActive(
 					Since:               now,
 					ConsecutiveFailures: m.Status.Operation.Attempts,
 				}
-				conditions.SetCondition(&m.Status.Conditions, conditions.TypeQuarantined, metav1.ConditionTrue, "PowerOnNotObserved", fmt.Sprintf("Machine failed to reach PoweringOn/On state after %d PowerOn attempts", m.Status.Operation.Attempts))
+				conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeQuarantined, metav1.ConditionTrue, "PowerOnNotObserved", fmt.Sprintf("Machine failed to reach PoweringOn/On state after %d PowerOn attempts", m.Status.Operation.Attempts))
 				return 1 * time.Minute
 			}
 		}
@@ -526,7 +526,7 @@ func (r *RunnerMachineReconciler) reconcileQuarantineRecovery(m *ghav1alpha1.Run
 		} else if time.Since(m.Status.Quarantine.HealthySince.Time) >= 10*time.Minute {
 			log.Info("clearing quarantine after continuous 10m stabilization period", "machine", m.Name)
 			m.Status.Quarantine = nil
-			conditions.SetCondition(&m.Status.Conditions, conditions.TypeQuarantined, metav1.ConditionFalse, conditions.ReasonReady, "Machine is stable and healthy")
+			conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeQuarantined, metav1.ConditionFalse, conditions.ReasonReady, "Machine is stable and healthy")
 		}
 	} else {
 		m.Status.Quarantine.HealthySince = nil
@@ -544,6 +544,12 @@ func (r *RunnerMachineReconciler) reconcileOff(
 ) time.Duration {
 	log := logf.FromContext(ctx)
 
+	// AlwaysOn マシンはスケールダウンによる電源OFFを禁止
+	if m.Spec.PowerPolicy == ghav1alpha1.RunnerMachinePowerPolicyAlwaysOn {
+		log.Info("machine powerPolicy is AlwaysOn, preserving power", "machine", m.Name)
+		return 1 * time.Minute
+	}
+
 	// Quarantine 中のマシンは原因調査・デバッグのため電源状態を維持 (PreservePower)
 	if m.Status.Quarantine != nil {
 		log.Info("machine is quarantined, preserving power state for inspection", "machine", m.Name, "reason", m.Status.Quarantine.Reason)
@@ -556,18 +562,18 @@ func (r *RunnerMachineReconciler) reconcileOff(
 	}
 
 	shutdownTimeout := 3 * time.Minute
-	if m.Spec.Redfish.Power.ShutdownTimeout != nil && m.Spec.Redfish.Power.ShutdownTimeout.Duration > 0 {
-		shutdownTimeout = m.Spec.Redfish.Power.ShutdownTimeout.Duration
+	if m.Spec.Redfish.Power.Shutdown.Timeout != nil && m.Spec.Redfish.Power.Shutdown.Timeout.Duration > 0 {
+		shutdownTimeout = m.Spec.Redfish.Power.Shutdown.Timeout.Duration
 	}
 
-	var forceOffAfter time.Duration
-	if m.Spec.Redfish.Power.ForceOffAfter != nil {
-		forceOffAfter = m.Spec.Redfish.Power.ForceOffAfter.Duration
+	timeoutPolicy := ghav1alpha1.RedfishTimeoutPolicyAbort
+	if m.Spec.Redfish.Power.Shutdown.TimeoutPolicy != "" {
+		timeoutPolicy = m.Spec.Redfish.Power.Shutdown.TimeoutPolicy
 	}
 
 	// 2. シャットダウン中 (PoweringOff) のタイムアウト・ForceOff判定
 	if m.Status.PowerState == ghav1alpha1.PowerStatePoweringOff {
-		r.handleShutdownTimeout(ctx, m, pwrCtrl, shutdownTimeout, forceOffAfter)
+		r.handleShutdownTimeout(ctx, m, pwrCtrl, shutdownTimeout, timeoutPolicy)
 		return 10 * time.Second
 	}
 
@@ -584,7 +590,7 @@ func (r *RunnerMachineReconciler) reconcileOff(
 				if ownership == CordonExternal {
 					m.Status.ExternallyCordoned = true
 					log.Info("node is cordoned by external actor, blocking scale-down power off", "node", remoteNode.Name)
-					conditions.SetCondition(&m.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonExternalCordon, "Node is cordoned externally; scale down power off is blocked")
+					conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonExternalCordon, "Node is cordoned externally; scale down power off is blocked")
 					return 30 * time.Second
 				}
 				m.Status.ExternallyCordoned = false
@@ -592,20 +598,26 @@ func (r *RunnerMachineReconciler) reconcileOff(
 		}
 
 		// 3.2 このNode上で現在実行中のRunner Podが存在するか確認 (Fail closed)
-		activePodCount, countErr := r.countActiveRunnerPodsOnNode(ctx, cluster, m.Spec.KubernetesNodeName)
+		activePodCount, countErr := r.countActiveRunnerPodsOnNode(ctx, cluster, m.Spec.NodeName)
 		if countErr != nil {
 			log.Error(countErr, "failed to count active runner pods on node, retrying safely", "machine", m.Name)
 			return 5 * time.Second
 		}
 		if activePodCount > 0 {
-			drainTimeout := 1 * time.Hour
+			drainTimeout := 10 * time.Minute
+			if m.Spec.Drain != nil && m.Spec.Drain.Timeout != nil && m.Spec.Drain.Timeout.Duration > 0 {
+				drainTimeout = m.Spec.Drain.Timeout.Duration
+			} else if nodePool != nil && nodePool.Spec.Drain != nil && nodePool.Spec.Drain.Timeout != nil && nodePool.Spec.Drain.Timeout.Duration > 0 {
+				drainTimeout = nodePool.Spec.Drain.Timeout.Duration
+			}
+
 			if drainStartedAt != nil && time.Since(drainStartedAt.Time) > drainTimeout {
 				log.Info("drain timed out with active runner pods; blocking scale-down power off to protect running jobs", "machine", m.Name, "activePods", activePodCount, "timeout", drainTimeout)
-				conditions.SetCondition(&m.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, "DrainTimedOut", fmt.Sprintf("Drain timed out after %s with %d active pods; scale-down power off blocked", drainTimeout, activePodCount))
+				conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeReady, metav1.ConditionFalse, "DrainTimedOut", fmt.Sprintf("Drain timed out after %s with %d active pods; scale-down power off blocked", drainTimeout, activePodCount))
 				return 30 * time.Second
 			}
 			log.Info("machine has active runner pods, waiting for drain", "machine", m.Name, "activePods", activePodCount)
-			conditions.SetCondition(&m.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonDraining, fmt.Sprintf("Waiting for %d runner pods to finish", activePodCount))
+			conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonDraining, fmt.Sprintf("Waiting for %d runner pods to finish", activePodCount))
 			return 5 * time.Second
 		}
 
@@ -653,7 +665,8 @@ func (r *RunnerMachineReconciler) handleShutdownTimeout(
 	ctx context.Context,
 	m *ghav1alpha1.RunnerMachine,
 	pwrCtrl redfish.PowerController,
-	shutdownTimeout, forceOffAfter time.Duration,
+	shutdownTimeout time.Duration,
+	timeoutPolicy ghav1alpha1.RedfishTimeoutPolicy,
 ) {
 	log := logf.FromContext(ctx)
 	if m.Status.LastPowerTransitionTime == nil {
@@ -666,7 +679,7 @@ func (r *RunnerMachineReconciler) handleShutdownTimeout(
 	if r.Recorder != nil {
 		r.Recorder.Eventf(m, nil, corev1.EventTypeWarning, "ShutdownStalled", "PowerOff", "Graceful shutdown on machine %s exceeded timeout %s", m.Name, shutdownTimeout)
 	}
-	conditions.SetCondition(&m.Status.Conditions, conditions.TypePowerReady, metav1.ConditionFalse, conditions.ReasonShutdownStalled, "Graceful shutdown exceeded shutdown timeout")
+	conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypePowerReady, metav1.ConditionFalse, conditions.ReasonShutdownStalled, "Graceful shutdown exceeded shutdown timeout")
 
 	// ForceOff は Drain完了が永続記録（DrainVerifiedAt != nil）されている場合のみ許可 (安全原則)
 	op := m.Status.Operation
@@ -675,15 +688,15 @@ func (r *RunnerMachineReconciler) handleShutdownTimeout(
 		return
 	}
 
-	if forceOffAfter > 0 && elapsed >= (shutdownTimeout+forceOffAfter) {
+	if timeoutPolicy == ghav1alpha1.RedfishTimeoutPolicyForceOff {
 		// 30秒以内の重複ForceOffを抑止
 		if op.Type == ghav1alpha1.PowerOperationTypeForceOff && time.Since(op.LastAttemptAt.Time) < 30*time.Second {
 			return
 		}
 
-		log.Info("force off timeout reached and drain was verified, initiating hard power cut", "machine", m.Name, "drainVerifiedAt", op.DrainVerifiedAt)
+		log.Info("force off timeout policy triggered and drain was verified, initiating hard power cut", "machine", m.Name, "drainVerifiedAt", op.DrainVerifiedAt)
 		if r.Recorder != nil {
-			r.Recorder.Eventf(m, nil, corev1.EventTypeWarning, "ForceOff", "PowerOff", "Force off timeout reached with verified drain, initiating hard power cut on machine %s", m.Name)
+			r.Recorder.Eventf(m, nil, corev1.EventTypeWarning, "ForceOff", "PowerOff", "Force off timeout policy triggered with verified drain, initiating hard power cut on machine %s", m.Name)
 		}
 		nowOp := metav1.Now()
 		op.Type = ghav1alpha1.PowerOperationTypeForceOff
@@ -766,22 +779,28 @@ func (r *RunnerMachineReconciler) countActiveRunnerPodsOnNode(ctx context.Contex
 	return count, nil
 }
 
-func (r *RunnerMachineReconciler) getDesiredState(ctx context.Context, m *ghav1alpha1.RunnerMachine) (ghav1alpha1.MachineDesiredState, *metav1.Time, *ghav1alpha1.RunnerNodePool, error) {
-	var pools ghav1alpha1.RunnerNodePoolList
-	if err := r.List(ctx, &pools, client.InNamespace(m.Namespace)); err != nil {
-		return ghav1alpha1.MachineDesiredStateOff, nil, nil, err
-	}
-
-	for _, p := range pools.Items {
-		selector, err := metav1.LabelSelectorAsSelector(&p.Spec.MachineSelector)
-		if err == nil && selector.Matches(labels.Set(m.Labels)) {
-			// 所属するNodePoolが見つかった
-			for _, dm := range p.Status.DesiredMachines {
-				if dm.Name == m.Name || (dm.UID != "" && dm.UID == string(m.UID)) {
-					return dm.DesiredState, dm.DrainStartedAt, &p, nil
+func (r *RunnerMachineReconciler) getDesiredState(ctx context.Context, m *ghav1alpha1.RunnerMachine, cluster *ghav1alpha1.RunnerCluster) (ghav1alpha1.MachineDesiredState, *metav1.Time, *ghav1alpha1.RunnerNodePool, error) {
+	// 1. Startup マシン判定: クラスタがオフラインまたは起動中で、このマシンが startup.machineRefs に含まれる場合は Active
+	if cluster != nil && cluster.Spec.Startup != nil {
+		for _, sRef := range cluster.Spec.Startup.MachineRefs {
+			if sRef.Name == m.Name {
+				if !cluster.Status.APIReachable {
+					return ghav1alpha1.MachineDesiredStateActive, nil, nil, nil
 				}
 			}
-			return ghav1alpha1.MachineDesiredStateOff, nil, &p, nil
+		}
+	}
+
+	// 2. NodePoolRef から desiredState を取得
+	if m.Spec.NodePoolRef != nil && m.Spec.NodePoolRef.Name != "" {
+		var pool ghav1alpha1.RunnerNodePool
+		if err := r.Get(ctx, client.ObjectKey{Namespace: m.Namespace, Name: m.Spec.NodePoolRef.Name}, &pool); err == nil {
+			for _, dm := range pool.Status.DesiredMachines {
+				if dm.Name == m.Name || (dm.UID != "" && dm.UID == string(m.UID)) {
+					return dm.DesiredState, dm.DrainStartedAt, &pool, nil
+				}
+			}
+			return ghav1alpha1.MachineDesiredStateOff, nil, &pool, nil
 		}
 	}
 
@@ -801,16 +820,48 @@ func (r *RunnerMachineReconciler) getRedfishController(ctx context.Context, m *g
 	var caCert []byte
 	if m.Spec.Redfish.TLS.CASecretRef != nil {
 		var caSecret corev1.Secret
-		if err := r.Get(ctx, client.ObjectKey{Namespace: m.Namespace, Name: m.Spec.Redfish.TLS.CASecretRef.Name}, &caSecret); err == nil {
-			caKey := m.Spec.Redfish.TLS.CASecretRef.Key
-			if caKey == "" {
-				caKey = "ca.crt"
-			}
-			caCert = caSecret.Data[caKey]
+		if err := r.Get(ctx, client.ObjectKey{Namespace: m.Namespace, Name: m.Spec.Redfish.TLS.CASecretRef.Name}, &caSecret); err != nil {
+			return nil, fmt.Errorf("failed to get redfish CA secret: %w", err)
 		}
+		caCert = caSecret.Data[m.Spec.Redfish.TLS.CASecretRef.Key]
 	}
 
 	return r.RedfishFactory.NewController(m.Spec.Redfish, username, password, caCert)
+}
+
+func (r *RunnerMachineReconciler) recordRedfishSuccess(m *ghav1alpha1.RunnerMachine, at time.Time) {
+	if m.Status.RedfishHealth == nil {
+		m.Status.RedfishHealth = &ghav1alpha1.RedfishHealthStatus{}
+	}
+	now := metav1.NewTime(at)
+	m.Status.RedfishHealth.LastSuccessTime = &now
+	m.Status.RedfishHealth.ConsecutiveFailures = 0
+	m.Status.RedfishHealth.Circuit = ghav1alpha1.RedfishCircuitClosed
+	m.Status.RedfishHealth.NextProbeTime = nil
+	conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeRedfishReachable, metav1.ConditionTrue, conditions.ReasonSuccess, "Redfish communication successful")
+}
+
+func (r *RunnerMachineReconciler) recordRedfishFailure(m *ghav1alpha1.RunnerMachine, at time.Time, err error) {
+	if m.Status.RedfishHealth == nil {
+		m.Status.RedfishHealth = &ghav1alpha1.RedfishHealthStatus{}
+	}
+	now := metav1.NewTime(at)
+	m.Status.RedfishHealth.LastFailureTime = &now
+	m.Status.RedfishHealth.ConsecutiveFailures++
+
+	failures := m.Status.RedfishHealth.ConsecutiveFailures
+	conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeRedfishReachable, metav1.ConditionFalse, conditions.ReasonFailed, fmt.Sprintf("Redfish failure count %d: %v", failures, err))
+
+	// サーキットブレーカー: 5回連続失敗でOpenに遷移し指数バックオフ (cap 10分)
+	if failures >= 5 {
+		m.Status.RedfishHealth.Circuit = ghav1alpha1.RedfishCircuitOpen
+		backoff := 30 * time.Second * time.Duration(1<<(failures-5))
+		if backoff > 10*time.Minute {
+			backoff = 10 * time.Minute
+		}
+		nextProbe := metav1.NewTime(at.Add(backoff))
+		m.Status.RedfishHealth.NextProbeTime = &nextProbe
+	}
 }
 
 func (r *RunnerMachineReconciler) updateStatus(ctx context.Context, m, _ *ghav1alpha1.RunnerMachine) error {
@@ -826,78 +877,29 @@ func (r *RunnerMachineReconciler) updateStatus(ctx context.Context, m, _ *ghav1a
 	})
 }
 
-func (r *RunnerMachineReconciler) recordRedfishFailure(machine *ghav1alpha1.RunnerMachine, now time.Time, err error) {
-	failTime := metav1.NewTime(now)
-	if machine.Status.RedfishHealth == nil {
-		machine.Status.RedfishHealth = &ghav1alpha1.RedfishHealthStatus{}
-	}
-	h := machine.Status.RedfishHealth
-	h.ConsecutiveFailures++
-	h.LastFailureTime = &failTime
-
-	// 連続3回失敗で回路を開く (指数バックオフ: 1m -> 2m -> 5m)
-	if h.ConsecutiveFailures >= 3 {
-		h.Circuit = ghav1alpha1.RedfishCircuitOpen
-		b := wait.Backoff{
-			Duration: 1 * time.Minute,
-			Factor:   2.0,
-			Cap:      5 * time.Minute,
-			Steps:    int(h.ConsecutiveFailures - 2),
-		}
-		backoff := b.Duration
-		for range int(h.ConsecutiveFailures - 3) {
-			backoff = b.Step()
-		}
-		nextProbe := metav1.NewTime(now.Add(backoff))
-		h.NextProbeTime = &nextProbe
-	}
-
-	conditions.SetCondition(
-		&machine.Status.Conditions,
-		conditions.TypeRedfishReachable,
-		metav1.ConditionFalse,
-		conditions.ReasonUnsupportedRedfish,
-		fmt.Sprintf("Redfish request failed (consecutive failures: %d): %v", h.ConsecutiveFailures, err),
-	)
-}
-
-func (r *RunnerMachineReconciler) recordRedfishSuccess(machine *ghav1alpha1.RunnerMachine, now time.Time) {
-	successTime := metav1.NewTime(now)
-	machine.Status.RedfishHealth = &ghav1alpha1.RedfishHealthStatus{
-		Circuit:         ghav1alpha1.RedfishCircuitClosed,
-		LastSuccessTime: &successTime,
-	}
-	conditions.SetCondition(
-		&machine.Status.Conditions,
-		conditions.TypeRedfishReachable,
-		metav1.ConditionTrue,
-		conditions.ReasonAPISucceeded,
-		"Redfish endpoint is reachable",
-	)
-}
-
 func (r *RunnerMachineReconciler) findMachinesForNodePool(ctx context.Context, obj client.Object) []ctrl.Request {
 	pool, ok := obj.(*ghav1alpha1.RunnerNodePool)
 	if !ok {
 		return nil
 	}
 
-	selector, err := metav1.LabelSelectorAsSelector(&pool.Spec.MachineSelector)
-	if err != nil {
-		return nil
-	}
-
-	var machineList ghav1alpha1.RunnerMachineList
-	if err := r.List(ctx, &machineList, client.InNamespace(pool.Namespace), client.MatchingLabelsSelector{Selector: selector}); err != nil {
-		return nil
+	var machines ghav1alpha1.RunnerMachineList
+	if err := r.List(ctx, &machines, client.InNamespace(pool.Namespace), client.MatchingFields{
+		IndexMachineNodePoolRefName: pool.Name,
+	}); err != nil {
+		if err := r.List(ctx, &machines, client.InNamespace(pool.Namespace)); err != nil {
+			return nil
+		}
 	}
 
 	var requests []ctrl.Request
-	for _, m := range machineList.Items {
-		requests = append(requests, ctrl.Request{
-			Namespace: m.Namespace,
-			Name:      m.Name,
-		})
+	for _, m := range machines.Items {
+		if m.Spec.NodePoolRef != nil && m.Spec.NodePoolRef.Name == pool.Name {
+			requests = append(requests, ctrl.Request{
+				Namespace: m.Namespace,
+				Name:      m.Name,
+			})
+		}
 	}
 	return requests
 }
@@ -908,31 +910,25 @@ func (r *RunnerMachineReconciler) findMachinesForCluster(ctx context.Context, ob
 		return nil
 	}
 
-	var machineList ghav1alpha1.RunnerMachineList
-	if err := r.List(ctx, &machineList, client.InNamespace(cluster.Namespace), client.MatchingFields{IndexClusterRefName: cluster.Name}); err != nil {
-		if err := r.List(ctx, &machineList, client.InNamespace(cluster.Namespace)); err != nil {
+	var machines ghav1alpha1.RunnerMachineList
+	if err := r.List(ctx, &machines, client.InNamespace(cluster.Namespace), client.MatchingFields{
+		IndexClusterRefName: cluster.Name,
+	}); err != nil {
+		if err := r.List(ctx, &machines, client.InNamespace(cluster.Namespace)); err != nil {
 			return nil
 		}
-		var matched []ctrl.Request
-		for i := range machineList.Items {
-			if machineList.Items[i].Spec.ClusterRef.Name == cluster.Name {
-				matched = append(matched, ctrl.Request{
-					Namespace: machineList.Items[i].Namespace,
-					Name:      machineList.Items[i].Name,
-				})
-			}
-		}
-		return matched
 	}
 
-	reqs := make([]ctrl.Request, len(machineList.Items))
-	for i := range machineList.Items {
-		reqs[i] = ctrl.Request{
-			Namespace: machineList.Items[i].Namespace,
-			Name:      machineList.Items[i].Name,
+	var requests []ctrl.Request
+	for _, m := range machines.Items {
+		if m.Spec.ClusterRef.Name == cluster.Name {
+			requests = append(requests, ctrl.Request{
+				Namespace: m.Namespace,
+				Name:      m.Name,
+			})
 		}
 	}
-	return reqs
+	return requests
 }
 
 // SetupWithManager sets up the controller with the Manager.

@@ -239,6 +239,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controller.EphemeralRunnerSetReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorder("ephemeralrunnerset-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "EphemeralRunnerSet")
+		os.Exit(1)
+	}
+
 	if err = (&controller.EphemeralRunnerReconciler{
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
@@ -266,6 +275,10 @@ func main() {
 		}
 		if err = (&ghav1alpha1.RunnerMachine{}).SetupWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "RunnerMachine")
+			os.Exit(1)
+		}
+		if err = (&ghav1alpha1.EphemeralRunnerSet{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "EphemeralRunnerSet")
 			os.Exit(1)
 		}
 		if err = (&ghav1alpha1.EphemeralRunner{}).SetupWebhookWithManager(mgr); err != nil {

@@ -22,7 +22,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestRunnerNodePoolDefaulting(t *testing.T) {
@@ -31,9 +30,6 @@ func TestRunnerNodePoolDefaulting(t *testing.T) {
 		Namespace: "default",
 		Spec: RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "test-cluster"},
-			MachineSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{"pool": "test"},
-			},
 		},
 	}
 
@@ -41,14 +37,8 @@ func TestRunnerNodePoolDefaulting(t *testing.T) {
 		t.Fatalf("Default() error = %v", err)
 	}
 
-	if pool.Spec.Scaling.Strategy != ScalingStrategyOrdered {
-		t.Errorf("expected default strategy 'Ordered', got %q", pool.Spec.Scaling.Strategy)
-	}
 	if pool.Spec.Scaling.MinNodes != 0 {
 		t.Errorf("expected default minNodes 0, got %d", pool.Spec.Scaling.MinNodes)
-	}
-	if pool.Spec.Scaling.MaxNodes != 1 {
-		t.Errorf("expected default maxNodes 1, got %d", pool.Spec.Scaling.MaxNodes)
 	}
 	if pool.Spec.Scaling.ScaleDownDelay == nil || pool.Spec.Scaling.ScaleDownDelay.Duration != 10*time.Minute {
 		t.Errorf("expected default scaleDownDelay 10m, got %v", pool.Spec.Scaling.ScaleDownDelay)
@@ -74,24 +64,19 @@ func TestRunnerNodePoolValidateCreate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "empty machineSelector",
-			mutate: func(p *RunnerNodePool) {
-				p.Spec.MachineSelector = metav1.LabelSelector{}
-			},
-			wantErr: true,
-		},
-		{
 			name: "minNodes > maxNodes",
 			mutate: func(p *RunnerNodePool) {
 				p.Spec.Scaling.MinNodes = 5
-				p.Spec.Scaling.MaxNodes = 2
+				two := int32(2)
+				p.Spec.Scaling.MaxNodes = &two
 			},
 			wantErr: true,
 		},
 		{
 			name: "maxNodes < 1",
 			mutate: func(p *RunnerNodePool) {
-				p.Spec.Scaling.MaxNodes = 0
+				zero := int32(0)
+				p.Spec.Scaling.MaxNodes = &zero
 			},
 			wantErr: true,
 		},
@@ -99,18 +84,15 @@ func TestRunnerNodePoolValidateCreate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			one := int32(1)
 			pool := &RunnerNodePool{
 				Name:      "test-pool",
 				Namespace: "default",
 				Spec: RunnerNodePoolSpec{
 					ClusterRef: corev1.LocalObjectReference{Name: "test-cluster"},
-					MachineSelector: metav1.LabelSelector{
-						MatchLabels: map[string]string{"pool": "test"},
-					},
 					Scaling: RunnerNodePoolScalingSpec{
 						MinNodes: 0,
-						MaxNodes: 1,
-						Strategy: ScalingStrategyOrdered,
+						MaxNodes: &one,
 					},
 				},
 			}
@@ -125,25 +107,23 @@ func TestRunnerNodePoolValidateCreate(t *testing.T) {
 }
 
 func TestRunnerNodePoolValidateUpdate(t *testing.T) {
+	one := int32(1)
 	oldPool := &RunnerNodePool{
 		Name:      "test-pool",
 		Namespace: "default",
 		Spec: RunnerNodePoolSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "test-cluster"},
-			MachineSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{"pool": "test"},
-			},
 			Scaling: RunnerNodePoolScalingSpec{
 				MinNodes: 0,
-				MaxNodes: 1,
-				Strategy: ScalingStrategyOrdered,
+				MaxNodes: &one,
 			},
 		},
 	}
 
 	t.Run("valid update", func(t *testing.T) {
 		newPool := oldPool.DeepCopy()
-		newPool.Spec.Scaling.MaxNodes = 3
+		three := int32(3)
+		newPool.Spec.Scaling.MaxNodes = &three
 		_, err := newPool.ValidateUpdate(context.Background(), oldPool, newPool)
 		if err != nil {
 			t.Errorf("expected valid update, got error: %v", err)
