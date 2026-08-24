@@ -179,3 +179,133 @@ func TestRunnerScaleSetReconciler_Deletion(t *testing.T) {
 		t.Errorf("expected finalizers to be removed, got %v", updated.Finalizers)
 	}
 }
+
+func TestRunnerScaleSetReconciler_ListenerCustomization(t *testing.T) {
+	scheme := runtime.NewScheme()
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
+
+	secret := &corev1.Secret{
+		Name:      "github-app-secret",
+		Namespace: "default",
+		Data: map[string][]byte{
+			"github_app_id":              []byte("12345"),
+			"github_app_installation_id": []byte("67890"),
+			"github_app_private_key":     []byte(validTestRSAPrivateKeyPEM),
+		},
+	}
+
+	nodePool := &ghav1alpha1.RunnerNodePool{
+		Name:      "pool1",
+		Namespace: "default",
+		Status: ghav1alpha1.RunnerNodePoolStatus{
+			PotentialRunnerCapacity: 4,
+			ReadyRunnerCapacity:     4,
+		},
+	}
+
+	scaleSet := &ghav1alpha1.RunnerScaleSet{
+		Name:       "custom-listener-ss",
+		Namespace:  "default",
+		Finalizers: []string{runner.FinalizerScaleSetCleanup},
+		Spec: ghav1alpha1.RunnerScaleSetSpec{
+			GitHub: ghav1alpha1.GitHubScaleSetSpec{
+				ConfigURL:            "https://github.com/example-org",
+				ScaleSetName:         "custom-listener-ss",
+				CredentialsSecretRef: corev1.LocalObjectReference{Name: "github-app-secret"},
+			},
+			NodePoolRef: corev1.LocalObjectReference{Name: "pool1"},
+			Listener: ghav1alpha1.ListenerSpec{
+				Image:              "custom-listener:v1",
+				ServiceAccountName: "custom-sa",
+				NodeSelector: map[string]string{
+					"kubernetes.io/os": "linux",
+				},
+				Tolerations: []corev1.Toleration{
+					{
+						Key:      "dedicated",
+						Operator: corev1.TolerationOpEqual,
+						Value:    "ci",
+						Effect:   corev1.TaintEffectNoSchedule,
+					},
+				},
+				Labels: map[string]string{
+					"custom-label": "custom-value",
+				},
+				Annotations: map[string]string{
+					"custom-annotation": "custom-value",
+				},
+				Env: []corev1.EnvVar{
+					{Name: "EXTRA_ENV", Value: "extra_val"},
+				},
+			},
+			Runner: ghav1alpha1.RunnerTemplateSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{Name: "runner", Image: "runner:latest"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	fakeClient := setupFakeClientBuilder(scheme).
+		WithObjects(secret, nodePool, scaleSet).
+		WithStatusSubresource(scaleSet, nodePool).
+		Build()
+
+	r := &RunnerScaleSetReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+		ScaleSetFactory: &fakeScaleSetFactory{
+			fakeClient: &fakeScaleSetClient{scaleSetID: 999},
+		},
+	}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		Namespace: "default", Name: "custom-listener-ss",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var deploy appsv1.Deployment
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "custom-listener-ss-listener"}, &deploy); err != nil {
+		t.Fatalf("expected listener deployment to exist: %v", err)
+	}
+
+	if deploy.Spec.Template.Spec.ServiceAccountName != "custom-sa" {
+		t.Errorf("expected ServiceAccountName custom-sa, got %s", deploy.Spec.Template.Spec.ServiceAccountName)
+	}
+	if deploy.Spec.Template.Spec.NodeSelector["kubernetes.io/os"] != "linux" {
+		t.Errorf("expected nodeSelector linux, got %v", deploy.Spec.Template.Spec.NodeSelector)
+	}
+	if len(deploy.Spec.Template.Spec.Tolerations) != 1 || deploy.Spec.Template.Spec.Tolerations[0].Key != "dedicated" {
+		t.Errorf("expected toleration with key dedicated, got %v", deploy.Spec.Template.Spec.Tolerations)
+	}
+	if deploy.Spec.Template.Labels["custom-label"] != "custom-value" {
+		t.Errorf("expected custom-label in pod template labels, got %v", deploy.Spec.Template.Labels)
+	}
+	if deploy.Spec.Template.Annotations["custom-annotation"] != "custom-value" {
+		t.Errorf("expected custom-annotation in pod template annotations, got %v", deploy.Spec.Template.Annotations)
+	}
+	if len(deploy.Spec.Template.Spec.Containers) != 1 {
+		t.Fatalf("expected 1 container, got %d", len(deploy.Spec.Template.Spec.Containers))
+	}
+	c := deploy.Spec.Template.Spec.Containers[0]
+	if c.Image != "custom-listener:v1" {
+		t.Errorf("expected container image custom-listener:v1, got %s", c.Image)
+	}
+	foundExtraEnv := false
+	for _, env := range c.Env {
+		if env.Name == "EXTRA_ENV" && env.Value == "extra_val" {
+			foundExtraEnv = true
+			break
+		}
+	}
+	if !foundExtraEnv {
+		t.Errorf("expected EXTRA_ENV=extra_val in container env, got %v", c.Env)
+	}
+}

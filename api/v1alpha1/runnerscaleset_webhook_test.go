@@ -56,6 +56,9 @@ func TestRunnerScaleSetDefaulting(t *testing.T) {
 	if ss.Spec.Scaling.MinRunners != 0 {
 		t.Errorf("expected MinRunners 0, got %d", ss.Spec.Scaling.MinRunners)
 	}
+	if ss.Spec.ContainerMode != ContainerModeDind {
+		t.Errorf("expected ContainerMode %q, got %q", ContainerModeDind, ss.Spec.ContainerMode)
+	}
 }
 
 func TestRunnerScaleSetValidateCreate(t *testing.T) {
@@ -150,14 +153,14 @@ func TestRunnerScaleSetValidateCreate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "privileged container forbidden",
+			name: "privileged container allowed",
 			mutate: func(ss *RunnerScaleSet) {
 				priv := true
 				ss.Spec.Runner.Template.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{
 					Privileged: &priv,
 				}
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name: "hostNetwork forbidden",

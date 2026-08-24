@@ -59,6 +59,9 @@ func (r *RunnerScaleSet) Default(_ context.Context, obj *RunnerScaleSet) error {
 	if obj.Spec.Scaling.MinRunners < 0 {
 		obj.Spec.Scaling.MinRunners = 0
 	}
+	if obj.Spec.ContainerMode == "" {
+		obj.Spec.ContainerMode = ContainerModeDind
+	}
 	return nil
 }
 
@@ -254,22 +257,6 @@ func (r *RunnerScaleSet) validateSecurityPolicy(allErrs *field.ErrorList) {
 			field.NewPath("spec", "runner", "template", "spec", "hostIPC"),
 			"hostIPC is forbidden for ephemeral runner pods",
 		))
-	}
-	for ci, c := range podSpec.Containers {
-		if c.SecurityContext != nil && c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged {
-			*allErrs = append(*allErrs, field.Forbidden(
-				field.NewPath("spec", "runner", "template", "spec", "containers").Index(ci).Child("securityContext", "privileged"),
-				"privileged containers are forbidden for ephemeral runner pods",
-			))
-		}
-	}
-	for ci, c := range podSpec.InitContainers {
-		if c.SecurityContext != nil && c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged {
-			*allErrs = append(*allErrs, field.Forbidden(
-				field.NewPath("spec", "runner", "template", "spec", "initContainers").Index(ci).Child("securityContext", "privileged"),
-				"privileged containers are forbidden for ephemeral runner pods",
-			))
-		}
 	}
 	for vi, v := range podSpec.Volumes {
 		if v.HostPath != nil {

@@ -59,6 +59,52 @@ type RunnerScaleSetScalingSpec struct {
 	MaxRunners *int32 `json:"maxRunners,omitempty"`
 }
 
+// ContainerModeType defines the container execution mode for runner pods.
+// +kubebuilder:validation:Enum=dind;kubernetes
+type ContainerModeType string
+
+const (
+	ContainerModeDind       ContainerModeType = "dind"
+	ContainerModeKubernetes ContainerModeType = "kubernetes"
+)
+
+// DinDSpec defines optional customizations for the Docker-in-Docker sidecar.
+type DinDSpec struct {
+	// Enabled specifies whether DinD sidecar injection is enabled. Defaults to true when ContainerMode is "dind".
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Image is the container image for docker:dind (default: "docker:dind").
+	// +kubebuilder:default="docker:dind"
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// Resources defines resource requests and limits for the dind container.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// DockerGroupGID is the GID of the docker group (default: "123").
+	// +kubebuilder:default="123"
+	// +optional
+	DockerGroupGID string `json:"dockerGroupGID,omitempty"`
+
+	// MTU is the network MTU configured for dockerd (e.g., "1280").
+	// +optional
+	MTU string `json:"mtu,omitempty"`
+
+	// Args allows overriding dockerd command arguments.
+	// +optional
+	Args []string `json:"args,omitempty"`
+
+	// Env allows adding extra environment variables to the dind container.
+	// +optional
+	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// SecurityContext allows overriding the security context of the dind container (defaults to privileged: true).
+	// +optional
+	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
+}
+
 // RunnerTemplateSpec defines the configuration of the ephemeral runner Pod.
 type RunnerTemplateSpec struct {
 	// Template is the pod template for executing ephemeral runner workloads on the remote cluster.
@@ -71,6 +117,63 @@ type ListenerSpec struct {
 	// Resources defines resource requests and limits for the listener container.
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// NodeSelector is a selector which must be true for the listener pod to fit on a node.
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	// Tolerations specifies the listener pod's tolerations.
+	// +optional
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+
+	// Affinity specifies scheduling constraints for the listener pod.
+	// +optional
+	Affinity *corev1.Affinity `json:"affinity,omitempty"`
+
+	// TopologySpreadConstraints specifies how to spread matching listener pods among the given topology.
+	// +optional
+	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
+
+	// PriorityClassName is the priority class name for the listener pod.
+	// +optional
+	PriorityClassName string `json:"priorityClassName,omitempty"`
+
+	// Labels specifies additional labels to attach to the listener pod.
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// Annotations specifies additional annotations to attach to the listener pod.
+	// +optional
+	Annotations map[string]string `json:"annotations,omitempty"`
+
+	// SecurityContext defines the pod-level security attributes for the listener pod.
+	// +optional
+	SecurityContext *corev1.PodSecurityContext `json:"securityContext,omitempty"`
+
+	// ContainerSecurityContext defines the security context for the listener container.
+	// +optional
+	ContainerSecurityContext *corev1.SecurityContext `json:"containerSecurityContext,omitempty"`
+
+	// Env allows defining additional environment variables for the listener container.
+	// +optional
+	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// Image allows overriding the container image used for the listener.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// ImagePullPolicy defines the pull policy for the listener container.
+	// +optional
+	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
+
+	// ImagePullSecrets is an optional list of references to secrets in the same namespace to use for pulling any of the images used by this PodSpec.
+	// +optional
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+
+	// ServiceAccountName is the name of the ServiceAccount to use to run this listener pod.
+	// If omitted, a dedicated ServiceAccount is automatically managed by SHARC.
+	// +optional
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
 }
 
 // MetricsSpec defines configuration for injecting metrics collection into runner pods.
@@ -99,6 +202,16 @@ type RunnerScaleSetSpec struct {
 	// +kubebuilder:default=false
 	// +optional
 	Suspend bool `json:"suspend,omitempty"`
+
+	// ContainerMode specifies the container execution mode (default: "dind").
+	// When set to "dind" (default), Docker-in-Docker sidecar and externals init containers are automatically injected.
+	// +kubebuilder:default="dind"
+	// +optional
+	ContainerMode ContainerModeType `json:"containerMode,omitempty"`
+
+	// DinD provides optional fine-grained configuration for the Docker-in-Docker sidecar when ContainerMode is "dind".
+	// +optional
+	DinD *DinDSpec `json:"dind,omitempty"`
 
 	// GitHub specifies the GitHub Actions connection and scale set target settings.
 	// +kubebuilder:validation:Required

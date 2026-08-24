@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"time"
@@ -478,20 +480,7 @@ func (r *RunnerScaleSetReconciler) reconcileListenerLease(ctx context.Context, s
 	return applyResource(ctx, r.Client, desiredLease)
 }
 
-func (r *RunnerScaleSetReconciler) reconcileListenerDeployment(ctx context.Context, ss *ghav1alpha1.RunnerScaleSet, owner *metav1apply.OwnerReferenceApplyConfiguration, labels map[string]string) error {
-	deployName := fmt.Sprintf("%s-listener", ss.Name)
-	saName := fmt.Sprintf("%s-listener", ss.Name)
-
-	listenerImage := r.ListenerImage
-	if listenerImage == "" {
-		listenerImage = runner.DefaultListenerImage
-	}
-
-	credHash := r.computeSecretHash(ctx, ss.Namespace, ss.Spec.GitHub.CredentialsSecretRef.Name)
-
-	maxSurge := intstr.FromInt(0)
-	maxUnavailable := intstr.FromInt(1)
-
+func (r *RunnerScaleSetReconciler) buildListenerContainer(ss *ghav1alpha1.RunnerScaleSet, listenerImage string) *corev1apply.ContainerApplyConfiguration {
 	containerApply := corev1apply.Container().
 		WithName("listener").
 		WithImage(listenerImage).
@@ -554,11 +543,32 @@ func (r *RunnerScaleSetReconciler) reconcileListenerDeployment(ctx context.Conte
 			WithPeriodSeconds(5),
 		)
 
-	// Listenerはmanagerと同じOpenTelemetry設定を引き継ぎ、独立したプロセスとしてメトリクスを送信する。
+	if ss.Spec.Listener.ImagePullPolicy != "" {
+		containerApply = containerApply.WithImagePullPolicy(ss.Spec.Listener.ImagePullPolicy)
+	}
+
 	for _, entry := range os.Environ() {
 		key, value, found := strings.Cut(entry, "=")
 		if found && strings.HasPrefix(key, "OTEL_") {
 			containerApply = containerApply.WithEnv(corev1apply.EnvVar().WithName(key).WithValue(value))
+		}
+	}
+
+	for _, ev := range ss.Spec.Listener.Env {
+		var envApply corev1apply.EnvVarApplyConfiguration
+		if raw, err := json.Marshal(ev); err == nil {
+			if err := json.Unmarshal(raw, &envApply); err == nil {
+				containerApply = containerApply.WithEnv(&envApply)
+			}
+		}
+	}
+
+	if ss.Spec.Listener.ContainerSecurityContext != nil {
+		var cSecApply corev1apply.SecurityContextApplyConfiguration
+		if raw, err := json.Marshal(ss.Spec.Listener.ContainerSecurityContext); err == nil {
+			if err := json.Unmarshal(raw, &cSecApply); err == nil {
+				containerApply = containerApply.WithSecurityContext(&cSecApply)
+			}
 		}
 	}
 
@@ -572,6 +582,123 @@ func (r *RunnerScaleSetReconciler) reconcileListenerDeployment(ctx context.Conte
 		}
 		containerApply = containerApply.WithResources(resApply)
 	}
+
+	return containerApply
+}
+
+func (r *RunnerScaleSetReconciler) buildListenerPodSpec(ss *ghav1alpha1.RunnerScaleSet, saName string, containerApply *corev1apply.ContainerApplyConfiguration) *corev1apply.PodSpecApplyConfiguration {
+	podSpecApply := corev1apply.PodSpec().
+		WithServiceAccountName(saName).
+		WithContainers(containerApply).
+		WithVolumes(
+			corev1apply.Volume().
+				WithName("tmp").
+				WithEmptyDir(corev1apply.EmptyDirVolumeSource()),
+		).
+		WithRestartPolicy(corev1.RestartPolicyAlways)
+
+	if len(ss.Spec.Listener.NodeSelector) > 0 {
+		podSpecApply = podSpecApply.WithNodeSelector(ss.Spec.Listener.NodeSelector)
+	}
+
+	if len(ss.Spec.Listener.Tolerations) > 0 {
+		for _, t := range ss.Spec.Listener.Tolerations {
+			var tolApply corev1apply.TolerationApplyConfiguration
+			if raw, err := json.Marshal(t); err == nil {
+				if err := json.Unmarshal(raw, &tolApply); err == nil {
+					podSpecApply = podSpecApply.WithTolerations(&tolApply)
+				}
+			}
+		}
+	}
+
+	if ss.Spec.Listener.Affinity != nil {
+		var affApply corev1apply.AffinityApplyConfiguration
+		if raw, err := json.Marshal(ss.Spec.Listener.Affinity); err == nil {
+			if err := json.Unmarshal(raw, &affApply); err == nil {
+				podSpecApply = podSpecApply.WithAffinity(&affApply)
+			}
+		}
+	}
+
+	if len(ss.Spec.Listener.TopologySpreadConstraints) > 0 {
+		for _, tsc := range ss.Spec.Listener.TopologySpreadConstraints {
+			var tscApply corev1apply.TopologySpreadConstraintApplyConfiguration
+			if raw, err := json.Marshal(tsc); err == nil {
+				if err := json.Unmarshal(raw, &tscApply); err == nil {
+					podSpecApply = podSpecApply.WithTopologySpreadConstraints(&tscApply)
+				}
+			}
+		}
+	}
+
+	if ss.Spec.Listener.PriorityClassName != "" {
+		podSpecApply = podSpecApply.WithPriorityClassName(ss.Spec.Listener.PriorityClassName)
+	}
+
+	if len(ss.Spec.Listener.ImagePullSecrets) > 0 {
+		for _, ips := range ss.Spec.Listener.ImagePullSecrets {
+			var ipsApply corev1apply.LocalObjectReferenceApplyConfiguration
+			if raw, err := json.Marshal(ips); err == nil {
+				if err := json.Unmarshal(raw, &ipsApply); err == nil {
+					podSpecApply = podSpecApply.WithImagePullSecrets(&ipsApply)
+				}
+			}
+		}
+	}
+
+	if ss.Spec.Listener.SecurityContext != nil {
+		var pSecApply corev1apply.PodSecurityContextApplyConfiguration
+		if raw, err := json.Marshal(ss.Spec.Listener.SecurityContext); err == nil {
+			if err := json.Unmarshal(raw, &pSecApply); err == nil {
+				podSpecApply = podSpecApply.WithSecurityContext(&pSecApply)
+			}
+		}
+	} else {
+		podSpecApply = podSpecApply.WithSecurityContext(corev1apply.PodSecurityContext().
+			WithRunAsNonRoot(true).
+			WithRunAsUser(65532).
+			WithRunAsGroup(65532).
+			WithFSGroup(65532).
+			WithSeccompProfile(corev1apply.SeccompProfile().
+				WithType(corev1.SeccompProfileTypeRuntimeDefault),
+			),
+		)
+	}
+
+	return podSpecApply
+}
+
+func (r *RunnerScaleSetReconciler) reconcileListenerDeployment(ctx context.Context, ss *ghav1alpha1.RunnerScaleSet, owner *metav1apply.OwnerReferenceApplyConfiguration, labels map[string]string) error {
+	deployName := fmt.Sprintf("%s-listener", ss.Name)
+	saName := fmt.Sprintf("%s-listener", ss.Name)
+	if ss.Spec.Listener.ServiceAccountName != "" {
+		saName = ss.Spec.Listener.ServiceAccountName
+	}
+
+	listenerImage := r.ListenerImage
+	if ss.Spec.Listener.Image != "" {
+		listenerImage = ss.Spec.Listener.Image
+	} else if listenerImage == "" {
+		listenerImage = runner.DefaultListenerImage
+	}
+
+	credHash := r.computeSecretHash(ctx, ss.Namespace, ss.Spec.GitHub.CredentialsSecretRef.Name)
+
+	maxSurge := intstr.FromInt(0)
+	maxUnavailable := intstr.FromInt(1)
+
+	containerApply := r.buildListenerContainer(ss, listenerImage)
+
+	podLabels := make(map[string]string)
+	maps.Copy(podLabels, ss.Spec.Listener.Labels)
+	maps.Copy(podLabels, labels)
+
+	podAnnotations := make(map[string]string)
+	maps.Copy(podAnnotations, ss.Spec.Listener.Annotations)
+	podAnnotations[runner.AnnotationCredentialsHash] = credHash
+
+	podSpecApply := r.buildListenerPodSpec(ss, saName, containerApply)
 
 	desiredDeploy := appsv1apply.Deployment(deployName, ss.Namespace).
 		WithLabels(labels).
@@ -587,29 +714,9 @@ func (r *RunnerScaleSetReconciler) reconcileListenerDeployment(ctx context.Conte
 			).
 			WithSelector(metav1apply.LabelSelector().WithMatchLabels(labels)).
 			WithTemplate(corev1apply.PodTemplateSpec().
-				WithLabels(labels).
-				WithAnnotations(map[string]string{
-					runner.AnnotationCredentialsHash: credHash,
-				}).
-				WithSpec(corev1apply.PodSpec().
-					WithServiceAccountName(saName).
-					WithSecurityContext(corev1apply.PodSecurityContext().
-						WithRunAsNonRoot(true).
-						WithRunAsUser(65532).
-						WithRunAsGroup(65532).
-						WithFSGroup(65532).
-						WithSeccompProfile(corev1apply.SeccompProfile().
-							WithType(corev1.SeccompProfileTypeRuntimeDefault),
-						),
-					).
-					WithContainers(containerApply).
-					WithVolumes(
-						corev1apply.Volume().
-							WithName("tmp").
-							WithEmptyDir(corev1apply.EmptyDirVolumeSource()),
-					).
-					WithRestartPolicy(corev1.RestartPolicyAlways),
-				),
+				WithLabels(podLabels).
+				WithAnnotations(podAnnotations).
+				WithSpec(podSpecApply),
 			),
 		)
 

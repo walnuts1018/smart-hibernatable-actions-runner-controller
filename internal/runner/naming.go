@@ -35,6 +35,18 @@ const (
 	CgroupRootHostPath          = "/sys/fs/cgroup"
 	CgroupRootMountPath         = "/host/sys/fs/cgroup"
 
+	DefaultDindImage          = "docker:dind"
+	DefaultDindGroupGID       = "123"
+	DefaultDindSocketPath     = "unix:///var/run/docker.sock"
+	DefaultActionsRunnerImage = "ghcr.io/actions/actions-runner:latest"
+
+	DindContainerName       = "dind"
+	DindInitExternalsName   = "init-dind-externals"
+	VolumeWorkName          = "work"
+	VolumeDindSockName      = "dind-sock"
+	VolumeDindExternalsName = "dind-externals"
+	VolumeDockerStorageName = "docker-storage"
+
 	EnvActionsRunnerHookJobStarted   = "ACTIONS_RUNNER_HOOK_JOB_STARTED"
 	EnvActionsRunnerHookJobCompleted = "ACTIONS_RUNNER_HOOK_JOB_COMPLETED"
 	EnvRunnerMetricsEndpoint         = "RUNNER_METRICS_ENDPOINT"
@@ -44,6 +56,9 @@ const (
 	EnvPodName                       = "POD_NAME"
 	EnvPodNamespace                  = "POD_NAMESPACE"
 	EnvNodeName                      = "NODE_NAME"
+	EnvDockerHost                    = "DOCKER_HOST"
+	EnvDockerGroupGID                = "DOCKER_GROUP_GID"
+	EnvRunnerWaitForDocker           = "RUNNER_WAIT_FOR_DOCKER_IN_SECONDS"
 )
 
 // GenerateRunnerName creates a unique runner name from the scale set name.

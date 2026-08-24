@@ -2,6 +2,7 @@ package runner
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 
 	corev1 "k8s.io/api/core/v1"
@@ -39,6 +40,7 @@ func BuildRunnerPod(namespace string, scaleSet *ghav1alpha1.RunnerScaleSet, runn
 		},
 	}
 
+	injectDinD(scaleSet, podSpec)
 	injectMetrics(scaleSet, podSpec)
 
 	containerFound := false
@@ -208,5 +210,224 @@ func injectMetrics(scaleSet *ghav1alpha1.RunnerScaleSet, podSpec *corev1.PodSpec
 	if !containerFound && len(podSpec.Containers) > 0 {
 		podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, volumeMounts...)
 		podSpec.Containers[0].Env = append(podSpec.Containers[0].Env, envVars...)
+	}
+}
+
+func injectDinD(scaleSet *ghav1alpha1.RunnerScaleSet, podSpec *corev1.PodSpec) {
+	// If ContainerMode is explicitly set to kubernetes, skip DinD injection.
+	if scaleSet.Spec.ContainerMode == ghav1alpha1.ContainerModeKubernetes {
+		return
+	}
+	if scaleSet.Spec.DinD != nil && scaleSet.Spec.DinD.Enabled != nil && !*scaleSet.Spec.DinD.Enabled {
+		return
+	}
+
+	runnerImage := getRunnerImage(podSpec)
+	dindContainer := buildDindContainer(scaleSet)
+
+	injectDindInitContainers(podSpec, runnerImage, dindContainer)
+	injectDindVolumes(podSpec)
+	injectDindRunnerMountsAndEnv(podSpec)
+}
+
+func getRunnerImage(podSpec *corev1.PodSpec) string {
+	for _, c := range podSpec.Containers {
+		if c.Name == DefaultContainerName && c.Image != "" {
+			return c.Image
+		}
+	}
+	if len(podSpec.Containers) > 0 && podSpec.Containers[0].Image != "" {
+		return podSpec.Containers[0].Image
+	}
+	return DefaultActionsRunnerImage
+}
+
+func buildDindContainer(scaleSet *ghav1alpha1.RunnerScaleSet) corev1.Container {
+	dindImage := DefaultDindImage
+	groupGID := DefaultDindGroupGID
+	var dindRes corev1.ResourceRequirements
+	var dindArgs []string
+	var dindEnv []corev1.EnvVar
+	var dindSecCtx *corev1.SecurityContext
+
+	if scaleSet.Spec.DinD != nil {
+		if scaleSet.Spec.DinD.Image != "" {
+			dindImage = scaleSet.Spec.DinD.Image
+		}
+		if scaleSet.Spec.DinD.DockerGroupGID != "" {
+			groupGID = scaleSet.Spec.DinD.DockerGroupGID
+		}
+		dindRes = scaleSet.Spec.DinD.Resources
+		dindArgs = scaleSet.Spec.DinD.Args
+		dindEnv = append([]corev1.EnvVar{}, scaleSet.Spec.DinD.Env...)
+		dindSecCtx = scaleSet.Spec.DinD.SecurityContext
+	}
+
+	if len(dindArgs) == 0 {
+		dindArgs = []string{
+			"dockerd",
+			"--host=unix:///var/run/docker.sock",
+			"--group=$(DOCKER_GROUP_GID)",
+		}
+		if scaleSet.Spec.DinD != nil && scaleSet.Spec.DinD.MTU != "" {
+			dindArgs = append(dindArgs, fmt.Sprintf("--mtu=%s", scaleSet.Spec.DinD.MTU))
+		}
+	}
+
+	if dindSecCtx == nil {
+		priv := true
+		dindSecCtx = &corev1.SecurityContext{
+			Privileged: &priv,
+		}
+	}
+
+	hasGroupGID := false
+	for _, e := range dindEnv {
+		if e.Name == EnvDockerGroupGID {
+			hasGroupGID = true
+			break
+		}
+	}
+	if !hasGroupGID {
+		dindEnv = append(dindEnv, corev1.EnvVar{
+			Name:  EnvDockerGroupGID,
+			Value: groupGID,
+		})
+	}
+
+	restartAlways := corev1.ContainerRestartPolicyAlways
+	return corev1.Container{
+		Name:            DindContainerName,
+		Image:           dindImage,
+		Args:            dindArgs,
+		Env:             dindEnv,
+		Resources:       dindRes,
+		SecurityContext: dindSecCtx,
+		RestartPolicy:   &restartAlways,
+		StartupProbe: &corev1.Probe{
+			Exec: &corev1.ExecAction{
+				Command: []string{"docker", "info"},
+			},
+			InitialDelaySeconds: 0,
+			PeriodSeconds:       5,
+			FailureThreshold:    24,
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: VolumeWorkName, MountPath: "/home/runner/_work"},
+			{Name: VolumeDindSockName, MountPath: "/var/run"},
+			{Name: VolumeDindExternalsName, MountPath: "/home/runner/externals"},
+			{Name: VolumeDockerStorageName, MountPath: "/var/lib/docker"},
+		},
+	}
+}
+
+func injectDindInitContainers(podSpec *corev1.PodSpec, runnerImage string, dindContainer corev1.Container) {
+	hasInitExternals := false
+	for _, ic := range podSpec.InitContainers {
+		if ic.Name == DindInitExternalsName {
+			hasInitExternals = true
+			break
+		}
+	}
+	if !hasInitExternals {
+		initExternals := corev1.Container{
+			Name:    DindInitExternalsName,
+			Image:   runnerImage,
+			Command: []string{"cp", "-r", "/home/runner/externals/.", "/home/runner/tmpDir/"},
+			VolumeMounts: []corev1.VolumeMount{
+				{Name: VolumeDindExternalsName, MountPath: "/home/runner/tmpDir"},
+			},
+		}
+		podSpec.InitContainers = append([]corev1.Container{initExternals}, podSpec.InitContainers...)
+	}
+
+	hasDind := false
+	for _, ic := range podSpec.InitContainers {
+		if ic.Name == DindContainerName {
+			hasDind = true
+			break
+		}
+	}
+	if !hasDind {
+		for _, c := range podSpec.Containers {
+			if c.Name == DindContainerName {
+				hasDind = true
+				break
+			}
+		}
+	}
+	if !hasDind {
+		podSpec.InitContainers = append(podSpec.InitContainers, dindContainer)
+	}
+}
+
+func injectDindVolumes(podSpec *corev1.PodSpec) {
+	dindVolumes := []corev1.Volume{
+		{Name: VolumeWorkName, EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		{Name: VolumeDindSockName, EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		{Name: VolumeDindExternalsName, EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		{Name: VolumeDockerStorageName, EmptyDir: &corev1.EmptyDirVolumeSource{}},
+	}
+	for _, dv := range dindVolumes {
+		exists := false
+		for _, v := range podSpec.Volumes {
+			if v.Name == dv.Name {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			podSpec.Volumes = append(podSpec.Volumes, dv)
+		}
+	}
+}
+
+func injectDindRunnerMountsAndEnv(podSpec *corev1.PodSpec) {
+	runnerMounts := []corev1.VolumeMount{
+		{Name: VolumeWorkName, MountPath: "/home/runner/_work"},
+		{Name: VolumeDindSockName, MountPath: "/var/run"},
+	}
+	runnerEnvs := []corev1.EnvVar{
+		{Name: EnvDockerHost, Value: DefaultDindSocketPath},
+		{Name: EnvRunnerWaitForDocker, Value: "120"},
+	}
+
+	injectIntoContainer := func(c *corev1.Container) {
+		for _, rm := range runnerMounts {
+			mountExists := false
+			for _, existingM := range c.VolumeMounts {
+				if existingM.Name == rm.Name || existingM.MountPath == rm.MountPath {
+					mountExists = true
+					break
+				}
+			}
+			if !mountExists {
+				c.VolumeMounts = append(c.VolumeMounts, rm)
+			}
+		}
+		for _, re := range runnerEnvs {
+			envExists := false
+			for _, existingE := range c.Env {
+				if existingE.Name == re.Name {
+					envExists = true
+					break
+				}
+			}
+			if !envExists {
+				c.Env = append(c.Env, re)
+			}
+		}
+	}
+
+	containerFound := false
+	for i := range podSpec.Containers {
+		if podSpec.Containers[i].Name == DefaultContainerName {
+			injectIntoContainer(&podSpec.Containers[i])
+			containerFound = true
+			break
+		}
+	}
+	if !containerFound && len(podSpec.Containers) > 0 {
+		injectIntoContainer(&podSpec.Containers[0])
 	}
 }

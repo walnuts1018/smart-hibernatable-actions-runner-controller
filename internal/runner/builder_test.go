@@ -86,11 +86,203 @@ func TestBuildRunnerPod(t *testing.T) {
 	}
 }
 
+func TestBuildRunnerPod_DinDInjection(t *testing.T) {
+	scaleSet := &ghav1alpha1.RunnerScaleSet{
+		Name: "test-scaleset",
+		UID:  "scaleset-uid-123",
+		Spec: ghav1alpha1.RunnerScaleSetSpec{
+			Runner: ghav1alpha1.RunnerTemplateSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "runner",
+								Image: "ghcr.io/actions/actions-runner:2.336.0",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	epRunner := &ghav1alpha1.EphemeralRunner{
+		Name: "test-runner",
+		UID:  "runner-uid-123",
+		Spec: ghav1alpha1.EphemeralRunnerSpec{
+			RunnerName: "test-runner",
+		},
+	}
+
+	pod := BuildRunnerPod("gha-runners", scaleSet, epRunner)
+
+	// 1. Verify initContainers
+	if len(pod.Spec.InitContainers) != 2 {
+		t.Fatalf("expected 2 initContainers, got %d", len(pod.Spec.InitContainers))
+	}
+	initExternals := pod.Spec.InitContainers[0]
+	if initExternals.Name != DindInitExternalsName {
+		t.Errorf("expected initContainer %s, got %s", DindInitExternalsName, initExternals.Name)
+	}
+	if initExternals.Image != "ghcr.io/actions/actions-runner:2.336.0" {
+		t.Errorf("expected initContainer image to match runner image, got %s", initExternals.Image)
+	}
+
+	dindC := pod.Spec.InitContainers[1]
+	if dindC.Name != DindContainerName {
+		t.Errorf("expected initContainer %s, got %s", DindContainerName, dindC.Name)
+	}
+	if dindC.Image != DefaultDindImage {
+		t.Errorf("expected dind image %s, got %s", DefaultDindImage, dindC.Image)
+	}
+	if dindC.RestartPolicy == nil || *dindC.RestartPolicy != corev1.ContainerRestartPolicyAlways {
+		t.Errorf("expected restartPolicy Always for dind sidecar")
+	}
+	if dindC.SecurityContext == nil || dindC.SecurityContext.Privileged == nil || !*dindC.SecurityContext.Privileged {
+		t.Errorf("expected privileged true for dind sidecar")
+	}
+
+	// 2. Verify volumes
+	volMap := make(map[string]bool)
+	for _, v := range pod.Spec.Volumes {
+		volMap[v.Name] = true
+	}
+	for _, expectedVol := range []string{VolumeWorkName, VolumeDindSockName, VolumeDindExternalsName, VolumeDockerStorageName} {
+		if !volMap[expectedVol] {
+			t.Errorf("missing volume %s", expectedVol)
+		}
+	}
+
+	// 3. Verify runner container mounts & env
+	c := pod.Spec.Containers[0]
+	mountMap := make(map[string]string)
+	for _, vm := range c.VolumeMounts {
+		mountMap[vm.Name] = vm.MountPath
+	}
+	if mountMap[VolumeWorkName] != "/home/runner/_work" {
+		t.Errorf("expected %s mounted at /home/runner/_work, got %s", VolumeWorkName, mountMap[VolumeWorkName])
+	}
+	if mountMap[VolumeDindSockName] != "/var/run" {
+		t.Errorf("expected %s mounted at /var/run, got %s", VolumeDindSockName, mountMap[VolumeDindSockName])
+	}
+
+	envMap := make(map[string]string)
+	for _, e := range c.Env {
+		envMap[e.Name] = e.Value
+	}
+	if envMap[EnvDockerHost] != DefaultDindSocketPath {
+		t.Errorf("expected %s=%s, got %s", EnvDockerHost, DefaultDindSocketPath, envMap[EnvDockerHost])
+	}
+	if envMap[EnvRunnerWaitForDocker] != "120" {
+		t.Errorf("expected %s=120, got %s", EnvRunnerWaitForDocker, envMap[EnvRunnerWaitForDocker])
+	}
+}
+
+func TestBuildRunnerPod_KubernetesMode(t *testing.T) {
+	scaleSet := &ghav1alpha1.RunnerScaleSet{
+		Name: "test-scaleset",
+		UID:  "scaleset-uid-123",
+		Spec: ghav1alpha1.RunnerScaleSetSpec{
+			ContainerMode: ghav1alpha1.ContainerModeKubernetes,
+			Runner: ghav1alpha1.RunnerTemplateSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "runner",
+								Image: "ghcr.io/actions/actions-runner:latest",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	epRunner := &ghav1alpha1.EphemeralRunner{
+		Name: "test-runner",
+		UID:  "runner-uid-123",
+		Spec: ghav1alpha1.EphemeralRunnerSpec{
+			RunnerName: "test-runner",
+		},
+	}
+
+	pod := BuildRunnerPod("gha-runners", scaleSet, epRunner)
+	if len(pod.Spec.InitContainers) != 0 {
+		t.Errorf("expected 0 initContainers in kubernetes mode, got %d", len(pod.Spec.InitContainers))
+	}
+}
+
+func TestBuildRunnerPod_CustomDinDSpec(t *testing.T) {
+	scaleSet := &ghav1alpha1.RunnerScaleSet{
+		Name: "test-scaleset",
+		UID:  "scaleset-uid-123",
+		Spec: ghav1alpha1.RunnerScaleSetSpec{
+			ContainerMode: ghav1alpha1.ContainerModeDind,
+			DinD: &ghav1alpha1.DinDSpec{
+				Image:          "docker:26-dind",
+				DockerGroupGID: "999",
+				MTU:            "1400",
+			},
+			Runner: ghav1alpha1.RunnerTemplateSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "runner",
+								Image: "ghcr.io/actions/actions-runner:latest",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	epRunner := &ghav1alpha1.EphemeralRunner{
+		Name: "test-runner",
+		UID:  "runner-uid-123",
+		Spec: ghav1alpha1.EphemeralRunnerSpec{
+			RunnerName: "test-runner",
+		},
+	}
+
+	pod := BuildRunnerPod("gha-runners", scaleSet, epRunner)
+	if len(pod.Spec.InitContainers) != 2 {
+		t.Fatalf("expected 2 initContainers, got %d", len(pod.Spec.InitContainers))
+	}
+	dindC := pod.Spec.InitContainers[1]
+	if dindC.Image != "docker:26-dind" {
+		t.Errorf("expected custom image docker:26-dind, got %s", dindC.Image)
+	}
+
+	foundMTU := false
+	for _, arg := range dindC.Args {
+		if arg == "--mtu=1400" {
+			foundMTU = true
+		}
+	}
+	if !foundMTU {
+		t.Errorf("expected --mtu=1400 in args, got %v", dindC.Args)
+	}
+
+	foundGID := false
+	for _, env := range dindC.Env {
+		if env.Name == EnvDockerGroupGID && env.Value == "999" {
+			foundGID = true
+		}
+	}
+	if !foundGID {
+		t.Errorf("expected DOCKER_GROUP_GID=999, got %v", dindC.Env)
+	}
+}
+
 func TestBuildRunnerPod_MetricsInjection(t *testing.T) {
 	scaleSet := &ghav1alpha1.RunnerScaleSet{
 		Name: "test-scaleset",
 		UID:  "scaleset-uid-123",
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
+			ContainerMode: ghav1alpha1.ContainerModeKubernetes,
 			Metrics: &ghav1alpha1.MetricsSpec{
 				Enabled:  true,
 				Endpoint: "http://default-collector.opentelemetry-collector.svc.cluster.local:4318/v1/metrics",
