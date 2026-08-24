@@ -9,6 +9,7 @@ kubectl = "1.36.4"
 jq = "1.8.2"
 go = "1.27.0"
 gh = "2.98.0"
+helm = "4.2.4"
 devcontainer-cli = "0.88.0"
 
 [tasks.manifests]
@@ -58,6 +59,17 @@ run = "./bin/custom-gcl run --fix ./..."
 [tasks."lint:shell"]
 description = "Validate shell scripts with shellcheck"
 run = "find .github/scripts -type f -name '*.sh' -print0 | xargs -0 shellcheck"
+
+[tasks."lint:chart"]
+description = "Validate Helm chart with lint and template render"
+run = """
+helm lint charts/smart-hibernatable-actions-runner-controller
+helm template smart-hibernatable-actions-runner-controller charts/smart-hibernatable-actions-runner-controller > /dev/null
+"""
+
+[tasks."package-chart"]
+description = "Package Helm chart into dist directory"
+run = "helm package charts/smart-hibernatable-actions-runner-controller --destination dist"
 
 [tasks.setup-test-e2e]
 description = "Set up a Kind cluster for e2e tests if it does not exist"

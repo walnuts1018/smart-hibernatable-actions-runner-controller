@@ -1,14 +1,14 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "gha-baremetal-operator.name" -}}
+{{- define "smart-hibernatable-actions-runner-controller.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Create a default fully qualified app name.
 */}}
-{{- define "gha-baremetal-operator.fullname" -}}
+{{- define "smart-hibernatable-actions-runner-controller.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -24,6 +24,37 @@ Create a default fully qualified app name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "gha-baremetal-operator.chart" -}}
+{{- define "smart-hibernatable-actions-runner-controller.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Common labels
+*/}}
+{{- define "smart-hibernatable-actions-runner-controller.labels" -}}
+helm.sh/chart: {{ include "smart-hibernatable-actions-runner-controller.chart" . }}
+{{ include "smart-hibernatable-actions-runner-controller.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{/*
+Selector labels
+*/}}
+{{- define "smart-hibernatable-actions-runner-controller.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "smart-hibernatable-actions-runner-controller.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{/*
+Create the name of the service account to use
+*/}}
+{{- define "smart-hibernatable-actions-runner-controller.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "smart-hibernatable-actions-runner-controller.fullname" .) .Values.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
 {{- end }}

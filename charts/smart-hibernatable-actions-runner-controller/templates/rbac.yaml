@@ -1,7 +1,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "gha-baremetal-operator.fullname" . }}-manager-role
+  name: {{ printf "%s-manager-role" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
 rules:
 - apiGroups:
   - gha.walnuts.dev
@@ -42,9 +42,9 @@ rules:
   verbs:
   - update
 - apiGroups:
-  - apps
+  - gha.walnuts.dev
   resources:
-  - deployments
+  - ephemeralrunnersets
   verbs:
   - create
   - delete
@@ -54,37 +54,53 @@ rules:
   - update
   - watch
 - apiGroups:
-  - coordination.k8s.io
+  - gha.walnuts.dev
   resources:
-  - leases
+  - ephemeralrunnersets/status
   verbs:
-  - create
-  - delete
   - get
-  - list
   - patch
   - update
-  - watch
 - apiGroups:
-  - rbac.authorization.k8s.io
+  - gha.walnuts.dev
   resources:
-  - roles
-  - rolebindings
+  - ephemeralrunnersets/finalizers
   verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
   - update
-  - watch
 - apiGroups:
   - ""
   resources:
-  - serviceaccounts
+  - pods
   - secrets
   - configmaps
   - events
+  - nodes
+  - serviceaccounts
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  - statefulsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs
   verbs:
   - create
   - delete
@@ -97,12 +113,12 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "gha-baremetal-operator.fullname" . }}-manager-rolebinding
+  name: {{ printf "%s-manager-rolebinding" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ include "gha-baremetal-operator.fullname" . }}-manager-role
+  name: {{ printf "%s-manager-role" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
 subjects:
 - kind: ServiceAccount
-  name: {{ .Values.serviceAccount.name | default (include "gha-baremetal-operator.fullname" .) }}
+  name: {{ .Values.serviceAccount.name | default (include "smart-hibernatable-actions-runner-controller.fullname" .) }}
   namespace: {{ .Release.Namespace }}

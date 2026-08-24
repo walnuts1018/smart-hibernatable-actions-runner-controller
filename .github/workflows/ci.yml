@@ -33,7 +33,7 @@ jobs:
       - name: Setup tools
         uses: ./.github/actions/setup-tools
         with:
-          tools: go go:sigs.k8s.io/controller-tools/cmd/controller-gen go:sigs.k8s.io/controller-runtime/tools/setup-envtest kustomize golangci-lint shellcheck kind kubectl jq
+          tools: go go:sigs.k8s.io/controller-tools/cmd/controller-gen go:sigs.k8s.io/controller-runtime/tools/setup-envtest kustomize golangci-lint shellcheck kind kubectl jq helm
           golangci-lint-cache: "true"
 
       - name: Generate manifests and code
@@ -51,6 +51,8 @@ jobs:
       - parallel:
           - name: Validate workflows and shell scripts
             run: mise run lint:shell
+          - name: Lint Helm chart
+            run: mise run lint:chart
           - name: Run golangci-lint
             run: mise run lint
           - name: Run unit tests

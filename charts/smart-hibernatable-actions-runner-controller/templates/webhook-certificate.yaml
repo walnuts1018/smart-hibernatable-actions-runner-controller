@@ -2,9 +2,9 @@
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
-  name: {{ include "gha-baremetal-operator.fullname" . }}-selfsigned-issuer
+  name: {{ printf "%s-selfsigned-issuer" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
   labels:
-    app.kubernetes.io/name: {{ include "gha-baremetal-operator.name" . }}
+    app.kubernetes.io/name: {{ include "smart-hibernatable-actions-runner-controller.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   selfSigned: {}
@@ -12,16 +12,16 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: {{ include "gha-baremetal-operator.fullname" . }}-serving-cert
+  name: {{ printf "%s-serving-cert" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
   labels:
-    app.kubernetes.io/name: {{ include "gha-baremetal-operator.name" . }}
+    app.kubernetes.io/name: {{ include "smart-hibernatable-actions-runner-controller.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   dnsNames:
-  - {{ include "gha-baremetal-operator.fullname" . }}-webhook-service.{{ .Release.Namespace }}.svc
-  - {{ include "gha-baremetal-operator.fullname" . }}-webhook-service.{{ .Release.Namespace }}.svc.cluster.local
+  - {{ printf "%s-webhook-service" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}.{{ .Release.Namespace }}.svc
+  - {{ printf "%s-webhook-service" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}.{{ .Release.Namespace }}.svc.cluster.local
   issuerRef:
     kind: Issuer
-    name: {{ include "gha-baremetal-operator.fullname" . }}-selfsigned-issuer
-  secretName: {{ .Values.webhook.certManager.certSecretName | default (printf "%s-webhook-cert" (include "gha-baremetal-operator.fullname" .)) }}
+    name: {{ printf "%s-selfsigned-issuer" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
+  secretName: {{ .Values.webhook.certManager.certSecretName | default (printf "%s-webhook-cert" (include "smart-hibernatable-actions-runner-controller.fullname" .)) | trunc 63 | trimSuffix "-" }}
 {{- end }}

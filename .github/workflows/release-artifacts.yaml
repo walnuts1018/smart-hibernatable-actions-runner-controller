@@ -166,3 +166,52 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: ./.github/scripts/publish-image-manifests.sh
+
+  publish-chart:
+    name: Package and Publish Helm Chart
+    runs-on: ubuntu-26.04
+    needs: merge
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
+
+      - name: Setup tools
+        uses: ./.github/actions/setup-tools
+        with:
+          tools: helm
+          go-cache: "false"
+
+      - name: Lint and package chart
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          CHART_VERSION="${RELEASE_TAG#v}"
+          mkdir -p dist
+          helm lint charts/smart-hibernatable-actions-runner-controller
+          helm package charts/smart-hibernatable-actions-runner-controller \
+            --version "$CHART_VERSION" \
+            --app-version "$CHART_VERSION" \
+            --destination dist
+
+      - name: Login to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish chart
+        shell: bash
+        run: |
+          shopt -s nullglob
+          packages=(dist/*.tgz)
+          if [[ "${#packages[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one packaged chart, found ${#packages[@]}"
+            exit 1
+          fi
+          helm push "${packages[0]}" "oci://${REGISTRY}/${{ github.repository_owner }}/charts"
+

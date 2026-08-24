@@ -2,9 +2,9 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ include "gha-baremetal-operator.fullname" . }}
+  name: {{ include "smart-hibernatable-actions-runner-controller.fullname" . }}
   labels:
-    {{- include "gha-baremetal-operator.labels" . | nindent 4 }}
+    {{- include "smart-hibernatable-actions-runner-controller.labels" . | nindent 4 }}
     {{- with .Values.metrics.serviceMonitor.additionalLabels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -15,5 +15,5 @@ spec:
       scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}
   selector:
     matchLabels:
-      {{- include "gha-baremetal-operator.selectorLabels" . | nindent 6 }}
+      {{- include "smart-hibernatable-actions-runner-controller.selectorLabels" . | nindent 6 }}
 {{- end }}

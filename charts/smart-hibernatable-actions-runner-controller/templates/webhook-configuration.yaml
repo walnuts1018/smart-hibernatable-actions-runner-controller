@@ -2,17 +2,17 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: {{ include "gha-baremetal-operator.fullname" . }}-mutating-webhook-configuration
+  name: {{ printf "%s-mutating-webhook-configuration" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
   {{- if .Values.webhook.certManager.enabled }}
   annotations:
-    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "gha-baremetal-operator.fullname" . }}-serving-cert
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ printf "%s-serving-cert" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
   {{- end }}
 webhooks:
 - admissionReviewVersions:
   - v1
   clientConfig:
     service:
-      name: {{ include "gha-baremetal-operator.fullname" . }}-webhook-service
+      name: {{ printf "%s-webhook-service" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
       namespace: {{ .Release.Namespace }}
       path: /mutate-gha-walnuts-dev-v1alpha1-runnercluster
   failurePolicy: Fail
@@ -32,7 +32,7 @@ webhooks:
   - v1
   clientConfig:
     service:
-      name: {{ include "gha-baremetal-operator.fullname" . }}-webhook-service
+      name: {{ printf "%s-webhook-service" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
       namespace: {{ .Release.Namespace }}
       path: /mutate-gha-walnuts-dev-v1alpha1-runnermachine
   failurePolicy: Fail
@@ -52,7 +52,7 @@ webhooks:
   - v1
   clientConfig:
     service:
-      name: {{ include "gha-baremetal-operator.fullname" . }}-webhook-service
+      name: {{ printf "%s-webhook-service" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
       namespace: {{ .Release.Namespace }}
       path: /mutate-gha-walnuts-dev-v1alpha1-runnernodepool
   failurePolicy: Fail
@@ -72,7 +72,7 @@ webhooks:
   - v1
   clientConfig:
     service:
-      name: {{ include "gha-baremetal-operator.fullname" . }}-webhook-service
+      name: {{ printf "%s-webhook-service" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
       namespace: {{ .Release.Namespace }}
       path: /mutate-gha-walnuts-dev-v1alpha1-runnerscaleset
   failurePolicy: Fail
@@ -92,17 +92,17 @@ webhooks:
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: {{ include "gha-baremetal-operator.fullname" . }}-validating-webhook-configuration
+  name: {{ printf "%s-validating-webhook-configuration" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
   {{- if .Values.webhook.certManager.enabled }}
   annotations:
-    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "gha-baremetal-operator.fullname" . }}-serving-cert
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ printf "%s-serving-cert" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
   {{- end }}
 webhooks:
 - admissionReviewVersions:
   - v1
   clientConfig:
     service:
-      name: {{ include "gha-baremetal-operator.fullname" . }}-webhook-service
+      name: {{ printf "%s-webhook-service" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
       namespace: {{ .Release.Namespace }}
       path: /validate-gha-walnuts-dev-v1alpha1-ephemeralrunner
   failurePolicy: Fail
@@ -122,7 +122,7 @@ webhooks:
   - v1
   clientConfig:
     service:
-      name: {{ include "gha-baremetal-operator.fullname" . }}-webhook-service
+      name: {{ printf "%s-webhook-service" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
       namespace: {{ .Release.Namespace }}
       path: /validate-gha-walnuts-dev-v1alpha1-runnercluster
   failurePolicy: Fail
@@ -142,7 +142,7 @@ webhooks:
   - v1
   clientConfig:
     service:
-      name: {{ include "gha-baremetal-operator.fullname" . }}-webhook-service
+      name: {{ printf "%s-webhook-service" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
       namespace: {{ .Release.Namespace }}
       path: /validate-gha-walnuts-dev-v1alpha1-runnermachine
   failurePolicy: Fail
@@ -162,7 +162,7 @@ webhooks:
   - v1
   clientConfig:
     service:
-      name: {{ include "gha-baremetal-operator.fullname" . }}-webhook-service
+      name: {{ printf "%s-webhook-service" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
       namespace: {{ .Release.Namespace }}
       path: /validate-gha-walnuts-dev-v1alpha1-runnernodepool
   failurePolicy: Fail
@@ -182,7 +182,7 @@ webhooks:
   - v1
   clientConfig:
     service:
-      name: {{ include "gha-baremetal-operator.fullname" . }}-webhook-service
+      name: {{ printf "%s-webhook-service" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
       namespace: {{ .Release.Namespace }}
       path: /validate-gha-walnuts-dev-v1alpha1-runnerscaleset
   failurePolicy: Fail

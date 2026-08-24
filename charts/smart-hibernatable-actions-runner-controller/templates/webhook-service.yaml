@@ -2,9 +2,9 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "gha-baremetal-operator.fullname" . }}-webhook-service
+  name: {{ printf "%s-webhook-service" (include "smart-hibernatable-actions-runner-controller.fullname" .) | trunc 63 | trimSuffix "-" }}
   labels:
-    app.kubernetes.io/name: {{ include "gha-baremetal-operator.name" . }}
+    app.kubernetes.io/name: {{ include "smart-hibernatable-actions-runner-controller.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   ports:
@@ -12,6 +12,6 @@ spec:
       protocol: TCP
       targetPort: {{ .Values.webhook.port | default 9443 }}
   selector:
-    app.kubernetes.io/name: {{ include "gha-baremetal-operator.name" . }}
+    app.kubernetes.io/name: {{ include "smart-hibernatable-actions-runner-controller.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}

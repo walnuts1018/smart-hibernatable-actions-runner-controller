@@ -1,27 +1,27 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "gha-baremetal-operator.fullname" . }}
+  name: {{ include "smart-hibernatable-actions-runner-controller.fullname" . }}
   labels:
-    app.kubernetes.io/name: {{ include "gha-baremetal-operator.name" . }}
+    app.kubernetes.io/name: {{ include "smart-hibernatable-actions-runner-controller.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: {{ include "gha-baremetal-operator.name" . }}
+      app.kubernetes.io/name: {{ include "smart-hibernatable-actions-runner-controller.name" . }}
       app.kubernetes.io/instance: {{ .Release.Name }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: {{ include "gha-baremetal-operator.name" . }}
+        app.kubernetes.io/name: {{ include "smart-hibernatable-actions-runner-controller.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
       {{- with .Values.podAnnotations }}
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
-      serviceAccountName: {{ .Values.serviceAccount.name | default (include "gha-baremetal-operator.fullname" .) }}
+      serviceAccountName: {{ .Values.serviceAccount.name | default (include "smart-hibernatable-actions-runner-controller.fullname" .) }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -74,7 +74,7 @@ spec:
         - name: webhook-certs
           secret:
             defaultMode: 420
-            secretName: {{ .Values.webhook.certManager.certSecretName | default (printf "%s-webhook-cert" (include "gha-baremetal-operator.fullname" .)) }}
+            secretName: {{ .Values.webhook.certManager.certSecretName | default (printf "%s-webhook-cert" (include "smart-hibernatable-actions-runner-controller.fullname" .)) }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

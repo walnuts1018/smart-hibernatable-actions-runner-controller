@@ -2,9 +2,9 @@
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  name: {{ include "gha-baremetal-operator.fullname" . }}
+  name: {{ include "smart-hibernatable-actions-runner-controller.fullname" . }}
   labels:
-    {{- include "gha-baremetal-operator.labels" . | nindent 4 }}
+    {{- include "smart-hibernatable-actions-runner-controller.labels" . | nindent 4 }}
     {{- with .Values.metrics.prometheusRule.additionalLabels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
