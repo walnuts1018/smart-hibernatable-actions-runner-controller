@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"encoding/json"
 	"maps"
 
 	corev1 "k8s.io/api/core/v1"
@@ -38,6 +39,8 @@ func BuildRunnerPod(namespace string, scaleSet *ghav1alpha1.RunnerScaleSet, runn
 		},
 	}
 
+	injectMetrics(scaleSet, podSpec)
+
 	containerFound := false
 	for i := range podSpec.Containers {
 		if podSpec.Containers[i].Name == targetContainerName {
@@ -70,5 +73,144 @@ func BuildRunnerPod(namespace string, scaleSet *ghav1alpha1.RunnerScaleSet, runn
 		Labels:      labels,
 		Annotations: annotations,
 		Spec:        *podSpec,
+	}
+}
+
+func injectMetrics(scaleSet *ghav1alpha1.RunnerScaleSet, podSpec *corev1.PodSpec) {
+	if scaleSet.Spec.Metrics == nil || !scaleSet.Spec.Metrics.Enabled {
+		return
+	}
+
+	hookImage := scaleSet.Spec.Metrics.Image
+	if hookImage == "" {
+		hookImage = DefaultRunnerHookImage
+	}
+
+	// 1. Add initContainer for copying runner-hook binary
+	initContainer := corev1.Container{
+		Name:    RunnerHookInitContainerName,
+		Image:   hookImage,
+		Command: []string{"/runner-hook", "install", RunnerHookMountPath},
+		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      RunnerHookVolumeName,
+				MountPath: RunnerHookMountPath,
+			},
+		},
+	}
+	podSpec.InitContainers = append([]corev1.Container{initContainer}, podSpec.InitContainers...)
+
+	// 2. Add volumes
+	hostPathDirectory := corev1.HostPathDirectory
+	podSpec.Volumes = append(podSpec.Volumes,
+		corev1.Volume{
+			Name: RunnerHookVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		},
+		corev1.Volume{
+			Name: CgroupRootVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: CgroupRootHostPath,
+					Type: &hostPathDirectory,
+				},
+			},
+		},
+	)
+
+	// 3. Prepare env vars
+	envVars := []corev1.EnvVar{
+		{
+			Name:  EnvActionsRunnerHookJobStarted,
+			Value: RunnerHookMountPath + "/job-started",
+		},
+		{
+			Name:  EnvActionsRunnerHookJobCompleted,
+			Value: RunnerHookMountPath + "/job-completed",
+		},
+		{
+			Name:  EnvRunnerMetricsCgroupRoot,
+			Value: CgroupRootMountPath,
+		},
+		{
+			Name: EnvPodUID,
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.uid",
+				},
+			},
+		},
+		{
+			Name: EnvPodName,
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.name",
+				},
+			},
+		},
+		{
+			Name: EnvPodNamespace,
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.namespace",
+				},
+			},
+		},
+		{
+			Name: EnvNodeName,
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "spec.nodeName",
+				},
+			},
+		},
+	}
+
+	if scaleSet.Spec.Metrics.Endpoint != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  EnvRunnerMetricsEndpoint,
+			Value: scaleSet.Spec.Metrics.Endpoint,
+		})
+	}
+
+	if len(scaleSet.Spec.Metrics.ExtraAttributes) > 0 {
+		if raw, err := json.Marshal(scaleSet.Spec.Metrics.ExtraAttributes); err == nil {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  EnvRunnerMetricsExtraAttrs,
+				Value: string(raw),
+			})
+		}
+	}
+
+	volumeMounts := []corev1.VolumeMount{
+		{
+			Name:      RunnerHookVolumeName,
+			MountPath: RunnerHookMountPath,
+			ReadOnly:  true,
+		},
+		{
+			Name:      CgroupRootVolumeName,
+			MountPath: CgroupRootMountPath,
+			ReadOnly:  true,
+		},
+	}
+
+	// 4. Inject into runner container (or fallback to first container)
+	targetContainerName := DefaultContainerName
+	containerFound := false
+	for i := range podSpec.Containers {
+		if podSpec.Containers[i].Name == targetContainerName {
+			podSpec.Containers[i].VolumeMounts = append(podSpec.Containers[i].VolumeMounts, volumeMounts...)
+			podSpec.Containers[i].Env = append(podSpec.Containers[i].Env, envVars...)
+			containerFound = true
+			break
+		}
+	}
+
+	if !containerFound && len(podSpec.Containers) > 0 {
+		podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, volumeMounts...)
+		podSpec.Containers[0].Env = append(podSpec.Containers[0].Env, envVars...)
 	}
 }

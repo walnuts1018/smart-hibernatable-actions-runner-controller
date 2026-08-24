@@ -55,8 +55,8 @@ type RunnerOptions struct {
 func RunListenerWithLease(ctx context.Context, opts RunnerOptions) error {
 	tracker := NewReadinessTracker()
 
-	// ProbeおよびMetrics用HTTPサーバーを起動
-	if err := StartHTTPServer(ctx, opts.ProbeAddr, opts.MetricsAddr, tracker); err != nil {
+	// Probe用HTTPサーバーを起動
+	if err := StartHTTPServer(ctx, opts.ProbeAddr, tracker); err != nil {
 		return fmt.Errorf("failed to start http server: %w", err)
 	}
 

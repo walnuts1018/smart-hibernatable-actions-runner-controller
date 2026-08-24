@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -235,11 +236,20 @@ func Shutdown(ctx context.Context) error {
 	return provider.Shutdown(ctx)
 }
 
-// Serve exposes the OpenTelemetry Prometheus exporter until ctx is canceled.
-func Serve(ctx context.Context, address string) error {
-	if handler == nil || address == "" || address == "0" {
+// Serve exposes the Prometheus exporter using the OpenTelemetry Prometheus host and port environment variables.
+func Serve(ctx context.Context) error {
+	if handler == nil {
 		return nil
 	}
+	host := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_PROMETHEUS_HOST"))
+	if host == "" {
+		host = "localhost"
+	}
+	port := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_PROMETHEUS_PORT"))
+	if port == "" {
+		port = "9464"
+	}
+	address := net.JoinHostPort(host, port)
 	server := &http.Server{Addr: address, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.ListenAndServe() }()

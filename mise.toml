@@ -97,8 +97,8 @@ KIND=kind KIND_CLUSTER="${KIND_CLUSTER}" go test -tags=e2e ./test/e2e/ -v -ginkg
 """
 
 [tasks.build]
-description = "Build manager and listener binaries"
-run = "go build -o bin/manager cmd/main.go && go build -o bin/listener cmd/listener/main.go"
+description = "Build manager, listener, and runner-hook binaries"
+run = "go build -o bin/manager cmd/main.go && go build -o bin/listener cmd/listener/main.go && go build -o bin/runner-hook cmd/runner-hook/main.go"
 
 [tasks.run]
 description = "Run a controller from host"

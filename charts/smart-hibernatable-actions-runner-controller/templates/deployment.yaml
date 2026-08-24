@@ -33,9 +33,6 @@ spec:
           args:
           - --leader-elect
           - --health-probe-bind-address=:8081
-          {{- if eq .Values.telemetry.metrics.exporter "prometheus" }}
-          - --metrics-bind-address=:{{ .Values.telemetry.prometheus.port }}
-          {{- end }}
           {{- if .Values.listenerImage.repository }}
           - --listener-image={{ .Values.listenerImage.repository }}:{{ .Values.listenerImage.tag | default .Chart.AppVersion }}
           {{- end }}
@@ -98,22 +95,10 @@ spec:
             - name: webhook-server
               containerPort: {{ .Values.webhook.port | default 9443 }}
               protocol: TCP
-            {{- if eq .Values.telemetry.metrics.exporter "prometheus" }}
-            - name: metrics
-              containerPort: {{ .Values.telemetry.prometheus.port }}
-              protocol: TCP
-            {{- end }}
           volumeMounts:
             - name: webhook-certs
               mountPath: /tmp/k8s-webhook-server/serving-certs
               readOnly: true
-          {{- else }}
-          {{- if eq .Values.telemetry.metrics.exporter "prometheus" }}
-          ports:
-            - name: metrics
-              containerPort: {{ .Values.telemetry.prometheus.port }}
-              protocol: TCP
-          {{- end }}
           {{- end }}
           livenessProbe:
             httpGet:

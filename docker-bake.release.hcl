@@ -19,7 +19,7 @@ variable "PLATFORM" {
 }
 
 group "default" {
-  targets = ["manager", "listener"]
+  targets = ["manager", "listener", "runner-hook"]
 }
 
 target "_common" {
@@ -53,5 +53,19 @@ target "listener" {
   ]
   cache-to = [
     "type=gha,mode=max,scope=listener-${ARCH_KEY},ignore-error=true"
+  ]
+}
+
+target "runner-hook" {
+  inherits = ["_common"]
+  target   = "runner-hook"
+  output = [
+    "type=image,name=${REGISTRY}/${REPO}/runner-hook,push-by-digest=true,name-canonical=true,push=true,compression=zstd"
+  ]
+  cache-from = [
+    "type=gha,scope=runner-hook-${ARCH_KEY}"
+  ]
+  cache-to = [
+    "type=gha,mode=max,scope=runner-hook-${ARCH_KEY},ignore-error=true"
   ]
 }

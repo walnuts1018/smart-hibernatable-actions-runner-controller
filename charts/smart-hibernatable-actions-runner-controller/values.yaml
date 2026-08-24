@@ -65,12 +65,3 @@ telemetry:
     headers: ""
     compression: ""
     timeout: ""
-  prometheus:
-    port: 8080
-    service:
-      enabled: true
-    serviceMonitor:
-      enabled: false
-      interval: 30s
-      scrapeTimeout: 10s
-      additionalLabels: {}

@@ -499,7 +499,6 @@ func (r *RunnerScaleSetReconciler) reconcileListenerDeployment(ctx context.Conte
 			"/listener",
 			fmt.Sprintf("--runner-scale-set=%s/%s", ss.Namespace, ss.Name),
 			"--health-probe-bind-address=:8081",
-			"--metrics-bind-address=:8080",
 		).
 		WithSecurityContext(corev1apply.SecurityContext().
 			WithAllowPrivilegeEscalation(false).
@@ -509,10 +508,6 @@ func (r *RunnerScaleSetReconciler) reconcileListenerDeployment(ctx context.Conte
 			),
 		).
 		WithPorts(
-			corev1apply.ContainerPort().
-				WithName("metrics").
-				WithContainerPort(8080).
-				WithProtocol(corev1.ProtocolTCP),
 			corev1apply.ContainerPort().
 				WithName("health").
 				WithContainerPort(8081).

@@ -7,8 +7,6 @@ import (
 	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
-
-	sharcmetrics "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/metrics"
 )
 
 var readinessLogger = ctrl.Log.WithName("listener-readiness")
@@ -89,8 +87,8 @@ func (r *ReadinessTracker) IsLeader() bool {
 	return r.leaseAcquired && r.githubAuthenticated && r.sessionEstablished && r.initialStatisticsReceived
 }
 
-// StartHTTPServer starts the HTTP server for probes and metrics.
-func StartHTTPServer(ctx context.Context, probeAddr, metricsAddr string, tracker *ReadinessTracker) error {
+// StartHTTPServer starts the HTTP server for probes.
+func StartHTTPServer(ctx context.Context, probeAddr string, tracker *ReadinessTracker) error {
 	mux := http.NewServeMux()
 
 	// Liveness probe: プロセスが生存していれば 200 OK
@@ -131,11 +129,6 @@ func StartHTTPServer(ctx context.Context, probeAddr, metricsAddr string, tracker
 		}
 	})
 
-	// Prometheus exporterを選択した場合は、同一ポートでメトリクスを公開できる。
-	if handler := sharcmetrics.Handler(); handler != nil && (probeAddr == metricsAddr || metricsAddr == "") {
-		mux.Handle("/metrics", handler)
-	}
-
 	probeServer := &http.Server{}
 	probeServer.Addr = probeAddr
 	probeServer.Handler = mux
@@ -148,33 +141,12 @@ func StartHTTPServer(ctx context.Context, probeAddr, metricsAddr string, tracker
 		}
 	}()
 
-	var metricsServer *http.Server
-	if handler := sharcmetrics.Handler(); handler != nil && metricsAddr != "" && metricsAddr != probeAddr {
-		metricsMux := http.NewServeMux()
-		metricsMux.Handle("/metrics", handler)
-		metricsServer = &http.Server{}
-		metricsServer.Addr = metricsAddr
-		metricsServer.Handler = metricsMux
-		metricsServer.ReadHeaderTimeout = 5 * time.Second
-		go func() {
-			readinessLogger.Info("starting metrics server", "addr", metricsAddr)
-			if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				readinessLogger.Error(err, "metrics server failed")
-			}
-		}()
-	}
-
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if err := probeServer.Shutdown(shutdownCtx); err != nil {
 			readinessLogger.Error(err, "failed to shutdown probe server")
-		}
-		if metricsServer != nil {
-			if err := metricsServer.Shutdown(shutdownCtx); err != nil {
-				readinessLogger.Error(err, "failed to shutdown metrics server")
-			}
 		}
 	}()
 

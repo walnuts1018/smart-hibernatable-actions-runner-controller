@@ -178,6 +178,30 @@ spec:
                         type: object
                     type: object
                 type: object
+              metrics:
+                description: Metrics defines settings for runner pod resource metrics
+                  collection and injection.
+                properties:
+                  enabled:
+                    description: Enabled specifies whether runner pod metrics collection
+                      is enabled.
+                    type: boolean
+                  endpoint:
+                    description: Endpoint is the OTLP/HTTP endpoint to export metrics
+                      to (e.g., http://default-collector.opentelemetry-collector.svc.cluster.local:4318/v1/metrics).
+                    type: string
+                  extraAttributes:
+                    additionalProperties:
+                      type: string
+                    description: ExtraAttributes defines additional resource or metric
+                      attributes to append to exported metrics.
+                    type: object
+                  image:
+                    description: |-
+                      Image is the container image containing the runner-hook binary used for injection.
+                      Defaults to the controller/hook image configured at controller level.
+                    type: string
+                type: object
               nodePoolRef:
                 description: NodePoolRef references the RunnerNodePool providing physical
                   machine capacity for this scale set.

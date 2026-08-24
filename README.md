@@ -154,18 +154,22 @@ telemetry:
     protocol: grpc
 ```
 
-Set `telemetry.otlp.protocol` to `http/protobuf` to use OTLP/HTTP. Headers, compression, and timeout can also be configured under `telemetry.otlp`. To expose a Prometheus-compatible Pull endpoint and create a `ServiceMonitor`:
+Set `telemetry.otlp.protocol` to `http/protobuf` to use OTLP/HTTP. Headers, compression, and timeout can also be configured under `telemetry.otlp`.
+
+The Prometheus exporter can be enabled without adding Prometheus-specific resources to the chart:
 
 ```yaml
 telemetry:
   metrics:
     exporter: prometheus
-  prometheus:
-    serviceMonitor:
-      enabled: true
-      additionalLabels:
-        release: kube-prometheus-stack
+env:
+  - name: OTEL_EXPORTER_PROMETHEUS_HOST
+    value: 0.0.0.0
+  - name: OTEL_EXPORTER_PROMETHEUS_PORT
+    value: "9464"
 ```
+
+When using this exporter, create any required Service, ServiceMonitor, authentication, and network policy resources separately.
 
 Environment variables unrelated to telemetry can be added directly to the manager container. Kubernetes `valueFrom` sources are also supported:
 

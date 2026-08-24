@@ -25,14 +25,12 @@ func main() {
 	var (
 		scaleSetRefStr string
 		probeAddr      string
-		metricsAddr    string
 		logLevelStr    string
 		logTypeStr     string
 	)
 
 	flag.StringVar(&scaleSetRefStr, "runner-scale-set", "", "The namespace/name of the RunnerScaleSet to listen for.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metrics endpoint binds to.")
 	flag.StringVar(&logLevelStr, "log-level", "info", "Log level (debug, info, warn, error)")
 	flag.StringVar(&logTypeStr, "log-type", "json", "Log type (json, text)")
 	flag.Parse()
@@ -79,15 +77,19 @@ func main() {
 			mainLog.Error(err, "failed to shut down OpenTelemetry metrics")
 		}
 	}()
+	go func() {
+		if err := metrics.Serve(ctx); err != nil {
+			mainLog.Error(err, "OpenTelemetry Prometheus endpoint failed")
+		}
+	}()
 
 	runnerOpts := listener.RunnerOptions{
-		Namespace:   namespace,
-		Name:        name,
-		ProbeAddr:   probeAddr,
-		MetricsAddr: metricsAddr,
-		Config:      config,
-		K8sClient:   k8sClient,
-		Clientset:   clientset,
+		Namespace: namespace,
+		Name:      name,
+		ProbeAddr: probeAddr,
+		Config:    config,
+		K8sClient: k8sClient,
+		Clientset: clientset,
 	}
 
 	if err := listener.RunListenerWithLease(ctx, runnerOpts); err != nil {

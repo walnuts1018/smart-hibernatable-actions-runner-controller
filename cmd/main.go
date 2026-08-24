@@ -59,14 +59,12 @@ func init() {
 }
 
 func main() {
-	var metricsAddr string
 	var webhookCertPath, webhookCertName, webhookCertKey string
 	var enableLeaderElection bool
 	var probeAddr string
 	var listenerImage string
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
-	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address used by the OpenTelemetry Prometheus exporter.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&listenerImage, "listener-image", "ghcr.io/walnuts1018/smart-hibernatable-actions-runner-controller/listener:latest", "The image to use for the listener deployment.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -97,7 +95,7 @@ func main() {
 		}
 	}()
 	go func() {
-		if err := metrics.Serve(ctx, metricsAddr); err != nil {
+		if err := metrics.Serve(ctx); err != nil {
 			setupLog.Error(err, "OpenTelemetry Prometheus endpoint failed")
 		}
 	}()

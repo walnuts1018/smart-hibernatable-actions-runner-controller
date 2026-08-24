@@ -26,6 +26,24 @@ const (
 	DefaultWorkDir                 = "_work"
 	DefaultRunnerNamespace         = "gha-runners"
 	DefaultListenerImage           = "ghcr.io/walnuts1018/smart-hibernatable-actions-runner-controller/listener:latest"
+	DefaultRunnerHookImage         = "ghcr.io/walnuts1018/smart-hibernatable-actions-runner-controller/runner-hook:latest"
+
+	RunnerHookVolumeName        = "runner-hook-bin"
+	RunnerHookMountPath         = "/opt/runner-hook"
+	RunnerHookInitContainerName = "init-runner-hook"
+	CgroupRootVolumeName        = "cgroup-root"
+	CgroupRootHostPath          = "/sys/fs/cgroup"
+	CgroupRootMountPath         = "/host/sys/fs/cgroup"
+
+	EnvActionsRunnerHookJobStarted   = "ACTIONS_RUNNER_HOOK_JOB_STARTED"
+	EnvActionsRunnerHookJobCompleted = "ACTIONS_RUNNER_HOOK_JOB_COMPLETED"
+	EnvRunnerMetricsEndpoint         = "RUNNER_METRICS_ENDPOINT"
+	EnvRunnerMetricsCgroupRoot       = "RUNNER_METRICS_CGROUP_ROOT"
+	EnvRunnerMetricsExtraAttrs       = "RUNNER_METRICS_EXTRA_ATTRIBUTES"
+	EnvPodUID                        = "POD_UID"
+	EnvPodName                       = "POD_NAME"
+	EnvPodNamespace                  = "POD_NAMESPACE"
+	EnvNodeName                      = "NODE_NAME"
 )
 
 // GenerateRunnerName creates a unique runner name from the scale set name.

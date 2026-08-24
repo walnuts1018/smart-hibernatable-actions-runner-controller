@@ -56,6 +56,16 @@ CGO_ENABLED=0 \
         -ldflags="-s -w" \
         -o /out/listener \
         ./cmd/listener/main.go
+
+CGO_ENABLED=0 \
+    go build \
+        -buildvcs=false \
+        -trimpath \
+        -mod=readonly \
+        -tags "${tags}" \
+        -ldflags="-s -w" \
+        -o /out/runner-hook \
+        ./cmd/runner-hook/main.go
 EOF
 
 # =============================================================================
@@ -92,3 +102,17 @@ COPY --link \
     /listener
 
 ENTRYPOINT ["/listener"]
+
+# =============================================================================
+# Runner Hook image
+# =============================================================================
+FROM static-runtime AS runner-hook
+
+COPY --link \
+    --from=static-go-builder \
+    --chmod=0555 \
+    /out/runner-hook \
+    /runner-hook
+
+ENTRYPOINT ["/runner-hook"]
+
