@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	"context"
 	"net/url"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -51,6 +52,14 @@ func (r *RunnerMachine) Default(_ context.Context, obj *RunnerMachine) error {
 
 	if obj.Spec.PowerPolicy == "" {
 		obj.Spec.PowerPolicy = RunnerMachinePowerPolicyOnDemand
+	}
+	if obj.Spec.Redfish.Endpoint != "" {
+		endpoint := strings.TrimSpace(obj.Spec.Redfish.Endpoint)
+		endpoint = strings.TrimRight(endpoint, "/")
+		endpoint = strings.TrimSuffix(endpoint, "/redfish/v1")
+		endpoint = strings.TrimRight(endpoint, "/")
+		endpoint = strings.TrimSuffix(endpoint, "/redfish")
+		obj.Spec.Redfish.Endpoint = strings.TrimRight(endpoint, "/")
 	}
 	if obj.Spec.Redfish.SystemID == "" {
 		obj.Spec.Redfish.SystemID = "1"

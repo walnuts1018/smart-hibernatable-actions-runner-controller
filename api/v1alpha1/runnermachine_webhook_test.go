@@ -32,7 +32,7 @@ func TestRunnerMachineDefaulting(t *testing.T) {
 			ClusterRef: corev1.LocalObjectReference{Name: "test-cluster"},
 			NodeName:   "node-1",
 			Redfish: RedfishSpec{
-				Endpoint:             "https://192.168.1.100",
+				Endpoint:             "https://192.168.1.100/",
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
 			},
 		},
@@ -42,6 +42,9 @@ func TestRunnerMachineDefaulting(t *testing.T) {
 		t.Fatalf("Default() error = %v", err)
 	}
 
+	if m.Spec.Redfish.Endpoint != "https://192.168.1.100" {
+		t.Errorf("expected normalized endpoint 'https://192.168.1.100', got %q", m.Spec.Redfish.Endpoint)
+	}
 	if m.Spec.PowerPolicy != RunnerMachinePowerPolicyOnDemand {
 		t.Errorf("expected default powerPolicy OnDemand, got %q", m.Spec.PowerPolicy)
 	}
