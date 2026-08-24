@@ -1,4 +1,4 @@
-# smart-hibernatable-actions-runner-controller (SHARC 🦈)
+# smart-hibernatable-actions-runner-controller (SHARC) 🦈
 
 A Kubernetes Operator to autoscale bare-metal GitHub Actions runners with physical machine power management via Redfish (BMC).
 
