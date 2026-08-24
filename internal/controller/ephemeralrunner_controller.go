@@ -35,12 +35,12 @@ type EphemeralRunnerReconciler struct {
 	ScaleSetFactory githubscaleset.ScaleSetClientFactory
 }
 
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=ephemeralrunners,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=ephemeralrunners/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=ephemeralrunners/finalizers,verbs=update
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnerscalesets,verbs=get;list;watch
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnernodepools,verbs=get;list;watch
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnerclusters,verbs=get;list;watch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunners,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunners/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunners/finalizers,verbs=update
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnerscalesets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnernodepools,verbs=get;list;watch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnerclusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 

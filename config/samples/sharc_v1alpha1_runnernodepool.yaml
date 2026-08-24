@@ -1,4 +1,4 @@
-apiVersion: gha.walnuts.dev/v1alpha1
+apiVersion: sharc.walnuts.dev/v1alpha1
 kind: RunnerNodePool
 metadata:
   name: amd64

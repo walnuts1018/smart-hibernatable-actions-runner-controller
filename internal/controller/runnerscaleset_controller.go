@@ -48,13 +48,13 @@ type RunnerScaleSetReconciler struct {
 	ListenerImage   string
 }
 
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnerscalesets,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnerscalesets/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnerscalesets/finalizers,verbs=update
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=ephemeralrunnersets,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=ephemeralrunnersets/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=ephemeralrunners,verbs=get;list;watch
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnernodepools,verbs=get;list;watch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnerscalesets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnerscalesets/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnerscalesets/finalizers,verbs=update
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunnersets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunnersets/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunners,verbs=get;list;watch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnernodepools,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
@@ -376,25 +376,25 @@ func (r *RunnerScaleSetReconciler) reconcileListenerRole(ctx context.Context, ss
 
 	rules := []*rbacv1apply.PolicyRuleApplyConfiguration{
 		rbacv1apply.PolicyRule().
-			WithAPIGroups("gha.walnuts.dev").
+			WithAPIGroups("sharc.walnuts.dev").
 			WithResources("runnerscalesets").
 			WithResourceNames(ss.Name).
 			WithVerbs("get"),
 		rbacv1apply.PolicyRule().
-			WithAPIGroups("gha.walnuts.dev").
+			WithAPIGroups("sharc.walnuts.dev").
 			WithResources("runnerscalesets/status").
 			WithResourceNames(ss.Name).
 			WithVerbs("get", "patch"),
 		rbacv1apply.PolicyRule().
-			WithAPIGroups("gha.walnuts.dev").
+			WithAPIGroups("sharc.walnuts.dev").
 			WithResources("ephemeralrunnersets", "ephemeralrunnersets/status").
 			WithVerbs("get", "list", "watch", "update", "patch"),
 		rbacv1apply.PolicyRule().
-			WithAPIGroups("gha.walnuts.dev").
+			WithAPIGroups("sharc.walnuts.dev").
 			WithResources("ephemeralrunners", "ephemeralrunners/status").
 			WithVerbs("get", "list", "watch", "update", "patch"),
 		rbacv1apply.PolicyRule().
-			WithAPIGroups("gha.walnuts.dev").
+			WithAPIGroups("sharc.walnuts.dev").
 			WithResources("runnernodepools", "runnermachines").
 			WithVerbs("get", "list"),
 		rbacv1apply.PolicyRule().

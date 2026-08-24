@@ -126,7 +126,7 @@ type RunnerClusterStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=rcluster;rc,categories=gha;all
+// +kubebuilder:resource:shortName=rcluster;rc,categories=sharc;all
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="Cluster phase"
 // +kubebuilder:printcolumn:name="API Reachable",type="boolean",JSONPath=".status.apiReachable",description="Kubernetes API server reachability"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"

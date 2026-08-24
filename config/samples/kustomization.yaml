@@ -1,9 +1,9 @@
 ## Append samples of your project ##
 resources:
-- gha_v1alpha1_runnercluster.yaml
-- gha_v1alpha1_runnermachine.yaml
-- gha_v1alpha1_runnernodepool.yaml
-- gha_v1alpha1_runnerscaleset.yaml
-- gha_v1alpha1_ephemeralrunnerset.yaml
-- gha_v1alpha1_ephemeralrunner.yaml
+- sharc_v1alpha1_runnercluster.yaml
+- sharc_v1alpha1_runnermachine.yaml
+- sharc_v1alpha1_runnernodepool.yaml
+- sharc_v1alpha1_runnerscaleset.yaml
+- sharc_v1alpha1_ephemeralrunnerset.yaml
+- sharc_v1alpha1_ephemeralrunner.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

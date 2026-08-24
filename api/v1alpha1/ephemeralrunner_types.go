@@ -194,7 +194,7 @@ type EphemeralRunnerStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=eprunner;er,categories=gha;all
+// +kubebuilder:resource:shortName=eprunner;er,categories=sharc;all
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="Ephemeral runner phase"
 // +kubebuilder:printcolumn:name="RunnerID",type="integer",JSONPath=".status.github.runnerID",description="GitHub Runner ID"
 // +kubebuilder:printcolumn:name="Remote Pod",type="string",JSONPath=".status.remotePod.name",description="Remote Pod name"

@@ -63,7 +63,7 @@ type EphemeralRunnerSetStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=ers;runnerset,categories=gha;all
+// +kubebuilder:resource:shortName=ers;runnerset,categories=sharc;all
 // +kubebuilder:printcolumn:name="Replicas",type="integer",JSONPath=".spec.replicas",description="Desired replicas"
 // +kubebuilder:printcolumn:name="Active",type="integer",JSONPath=".status.activeReplicas",description="Active runners count"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"

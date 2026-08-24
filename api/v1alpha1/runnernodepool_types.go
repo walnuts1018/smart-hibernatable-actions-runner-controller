@@ -140,7 +140,7 @@ type MachinePlanStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=rnodepool;rnp,categories=gha;all
+// +kubebuilder:resource:shortName=rnodepool;rnp,categories=sharc;all
 // +kubebuilder:printcolumn:name="Desired Nodes",type="integer",JSONPath=".status.desiredNodes",description="Desired number of physical nodes"
 // +kubebuilder:printcolumn:name="Powered On",type="integer",JSONPath=".status.poweredOnNodes",description="Powered on nodes count"
 // +kubebuilder:printcolumn:name="Ready Nodes",type="integer",JSONPath=".status.readyNodes",description="Ready nodes count"

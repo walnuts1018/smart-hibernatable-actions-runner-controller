@@ -10,12 +10,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /mutate-gha-walnuts-dev-v1alpha1-ephemeralrunnerset
+      path: /mutate-sharc.walnuts.dev-v1alpha1-ephemeralrunnerset
   failurePolicy: Fail
   name: mephemeralrunnerset.kb.io
   rules:
   - apiGroups:
-    - gha.walnuts.dev
+    - sharc.walnuts.dev
     apiVersions:
     - v1alpha1
     operations:
@@ -30,12 +30,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /mutate-gha-walnuts-dev-v1alpha1-runnercluster
+      path: /mutate-sharc.walnuts.dev-v1alpha1-runnercluster
   failurePolicy: Fail
   name: mrunnercluster.kb.io
   rules:
   - apiGroups:
-    - gha.walnuts.dev
+    - sharc.walnuts.dev
     apiVersions:
     - v1alpha1
     operations:
@@ -50,12 +50,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /mutate-gha-walnuts-dev-v1alpha1-runnermachine
+      path: /mutate-sharc.walnuts.dev-v1alpha1-runnermachine
   failurePolicy: Fail
   name: mrunnermachine.kb.io
   rules:
   - apiGroups:
-    - gha.walnuts.dev
+    - sharc.walnuts.dev
     apiVersions:
     - v1alpha1
     operations:
@@ -70,12 +70,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /mutate-gha-walnuts-dev-v1alpha1-runnernodepool
+      path: /mutate-sharc.walnuts.dev-v1alpha1-runnernodepool
   failurePolicy: Fail
   name: mrunnernodepool.kb.io
   rules:
   - apiGroups:
-    - gha.walnuts.dev
+    - sharc.walnuts.dev
     apiVersions:
     - v1alpha1
     operations:
@@ -90,12 +90,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /mutate-gha-walnuts-dev-v1alpha1-runnerscaleset
+      path: /mutate-sharc.walnuts.dev-v1alpha1-runnerscaleset
   failurePolicy: Fail
   name: mrunnerscaleset.kb.io
   rules:
   - apiGroups:
-    - gha.walnuts.dev
+    - sharc.walnuts.dev
     apiVersions:
     - v1alpha1
     operations:
@@ -116,12 +116,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-gha-walnuts-dev-v1alpha1-ephemeralrunner
+      path: /validate-sharc.walnuts.dev-v1alpha1-ephemeralrunner
   failurePolicy: Fail
   name: vephemeralrunner.kb.io
   rules:
   - apiGroups:
-    - gha.walnuts.dev
+    - sharc.walnuts.dev
     apiVersions:
     - v1alpha1
     operations:
@@ -136,12 +136,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-gha-walnuts-dev-v1alpha1-ephemeralrunnerset
+      path: /validate-sharc.walnuts.dev-v1alpha1-ephemeralrunnerset
   failurePolicy: Fail
   name: vephemeralrunnerset.kb.io
   rules:
   - apiGroups:
-    - gha.walnuts.dev
+    - sharc.walnuts.dev
     apiVersions:
     - v1alpha1
     operations:
@@ -156,12 +156,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-gha-walnuts-dev-v1alpha1-runnercluster
+      path: /validate-sharc.walnuts.dev-v1alpha1-runnercluster
   failurePolicy: Fail
   name: vrunnercluster.kb.io
   rules:
   - apiGroups:
-    - gha.walnuts.dev
+    - sharc.walnuts.dev
     apiVersions:
     - v1alpha1
     operations:
@@ -176,12 +176,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-gha-walnuts-dev-v1alpha1-runnermachine
+      path: /validate-sharc.walnuts.dev-v1alpha1-runnermachine
   failurePolicy: Fail
   name: vrunnermachine.kb.io
   rules:
   - apiGroups:
-    - gha.walnuts.dev
+    - sharc.walnuts.dev
     apiVersions:
     - v1alpha1
     operations:
@@ -196,12 +196,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-gha-walnuts-dev-v1alpha1-runnernodepool
+      path: /validate-sharc.walnuts.dev-v1alpha1-runnernodepool
   failurePolicy: Fail
   name: vrunnernodepool.kb.io
   rules:
   - apiGroups:
-    - gha.walnuts.dev
+    - sharc.walnuts.dev
     apiVersions:
     - v1alpha1
     operations:
@@ -216,12 +216,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-gha-walnuts-dev-v1alpha1-runnerscaleset
+      path: /validate-sharc.walnuts.dev-v1alpha1-runnerscaleset
   failurePolicy: Fail
   name: vrunnerscaleset.kb.io
   rules:
   - apiGroups:
-    - gha.walnuts.dev
+    - sharc.walnuts.dev
     apiVersions:
     - v1alpha1
     operations:

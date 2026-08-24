@@ -1,7 +1,7 @@
 # This rule is not used by the project smart-hibernatable-actions-runner-controller itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
-# Grants full permissions ('*') over gha.walnuts.dev.
+# Grants full permissions ('*') over sharc.walnuts.dev.
 # This role is intended for users authorized to modify roles and bindings within the cluster,
 # enabling them to delegate specific permissions to other users or groups as needed.
 
@@ -14,13 +14,13 @@ metadata:
   name: ephemeralrunner-admin-role
 rules:
 - apiGroups:
-  - gha.walnuts.dev
+  - sharc.walnuts.dev
   resources:
   - ephemeralrunners
   verbs:
   - '*'
 - apiGroups:
-  - gha.walnuts.dev
+  - sharc.walnuts.dev
   resources:
   - ephemeralrunners/status
   verbs:

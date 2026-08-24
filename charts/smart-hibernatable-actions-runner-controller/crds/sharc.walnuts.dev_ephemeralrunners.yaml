@@ -4,12 +4,12 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.21.0
-  name: ephemeralrunners.gha.walnuts.dev
+  name: ephemeralrunners.sharc.walnuts.dev
 spec:
-  group: gha.walnuts.dev
+  group: sharc.walnuts.dev
   names:
     categories:
-    - gha
+    - sharc
     - all
     kind: EphemeralRunner
     listKind: EphemeralRunnerList

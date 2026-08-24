@@ -33,13 +33,13 @@ type RunnerNodePoolReconciler struct {
 	EnableMultiNode bool
 }
 
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnernodepools,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnernodepools/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnernodepools/finalizers,verbs=update
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnermachines,verbs=get;list;watch
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnermachines/status,verbs=get
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnerscalesets,verbs=get;list;watch
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=ephemeralrunners,verbs=get;list;watch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnernodepools,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnernodepools/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnernodepools/finalizers,verbs=update
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnermachines,verbs=get;list;watch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnermachines/status,verbs=get
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnerscalesets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunners,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 

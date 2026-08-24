@@ -13,7 +13,7 @@ resources:
     crdVersion: v1
     namespaced: true
   domain: walnuts.dev
-  group: gha
+  group: sharc
   kind: RunnerCluster
   path: github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1
   version: v1alpha1
@@ -24,7 +24,7 @@ resources:
     crdVersion: v1
     namespaced: true
   domain: walnuts.dev
-  group: gha
+  group: sharc
   kind: RunnerMachine
   path: github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1
   version: v1alpha1
@@ -35,7 +35,7 @@ resources:
     crdVersion: v1
     namespaced: true
   domain: walnuts.dev
-  group: gha
+  group: sharc
   kind: RunnerNodePool
   path: github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1
   version: v1alpha1
@@ -46,7 +46,7 @@ resources:
     crdVersion: v1
     namespaced: true
   domain: walnuts.dev
-  group: gha
+  group: sharc
   kind: RunnerScaleSet
   path: github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1
   version: v1alpha1
@@ -57,7 +57,7 @@ resources:
     crdVersion: v1
     namespaced: true
   domain: walnuts.dev
-  group: gha
+  group: sharc
   kind: EphemeralRunnerSet
   path: github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1
   version: v1alpha1
@@ -68,7 +68,7 @@ resources:
     crdVersion: v1
     namespaced: true
   domain: walnuts.dev
-  group: gha
+  group: sharc
   kind: EphemeralRunner
   path: github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1
   version: v1alpha1

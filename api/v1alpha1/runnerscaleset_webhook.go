@@ -40,7 +40,7 @@ func (r *RunnerScaleSet) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// +kubebuilder:webhook:path=/mutate-gha-walnuts-dev-v1alpha1-runnerscaleset,mutating=true,failurePolicy=fail,sideEffects=None,groups=gha.walnuts.dev,resources=runnerscalesets,verbs=create;update,versions=v1alpha1,name=mrunnerscaleset.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/mutate-sharc.walnuts.dev-v1alpha1-runnerscaleset,mutating=true,failurePolicy=fail,sideEffects=None,groups=sharc.walnuts.dev,resources=runnerscalesets,verbs=create;update,versions=v1alpha1,name=mrunnerscaleset.kb.io,admissionReviewVersions=v1
 
 var _ admission.Defaulter[*RunnerScaleSet] = &RunnerScaleSet{}
 
@@ -65,7 +65,7 @@ func (r *RunnerScaleSet) Default(_ context.Context, obj *RunnerScaleSet) error {
 	return nil
 }
 
-// +kubebuilder:webhook:path=/validate-gha-walnuts-dev-v1alpha1-runnerscaleset,mutating=false,failurePolicy=fail,sideEffects=None,groups=gha.walnuts.dev,resources=runnerscalesets,verbs=create;update,versions=v1alpha1,name=vrunnerscaleset.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-sharc.walnuts.dev-v1alpha1-runnerscaleset,mutating=false,failurePolicy=fail,sideEffects=None,groups=sharc.walnuts.dev,resources=runnerscalesets,verbs=create;update,versions=v1alpha1,name=vrunnerscaleset.kb.io,admissionReviewVersions=v1
 
 var _ admission.Validator[*RunnerScaleSet] = &RunnerScaleSet{}
 
@@ -270,7 +270,7 @@ func (r *RunnerScaleSet) validateSecurityPolicy(allErrs *field.ErrorList) {
 
 func (r *RunnerScaleSet) validateReservedLabels(allErrs *field.ErrorList) {
 	for k := range r.Spec.Runner.Template.Labels {
-		if k == "gha.walnuts.dev/managed-by" || k == "gha.walnuts.dev/scaleset-uid" || k == "gha.walnuts.dev/scaleset-name" || k == "gha.walnuts.dev/runner-uid" || k == "gha.walnuts.dev/runner-name" {
+		if k == "sharc.walnuts.dev/managed-by" || k == "sharc.walnuts.dev/scaleset-uid" || k == "sharc.walnuts.dev/scaleset-name" || k == "sharc.walnuts.dev/runner-uid" || k == "sharc.walnuts.dev/runner-name" {
 			*allErrs = append(*allErrs, field.Forbidden(
 				field.NewPath("spec", "runner", "template", "metadata", "labels").Key(k),
 				fmt.Sprintf("label %q is reserved and managed by SHARC", k),

@@ -38,7 +38,7 @@ func (r *EphemeralRunnerSet) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// +kubebuilder:webhook:path=/mutate-gha-walnuts-dev-v1alpha1-ephemeralrunnerset,mutating=true,failurePolicy=fail,sideEffects=None,groups=gha.walnuts.dev,resources=ephemeralrunnersets,verbs=create;update,versions=v1alpha1,name=mephemeralrunnerset.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/mutate-sharc.walnuts.dev-v1alpha1-ephemeralrunnerset,mutating=true,failurePolicy=fail,sideEffects=None,groups=sharc.walnuts.dev,resources=ephemeralrunnersets,verbs=create;update,versions=v1alpha1,name=mephemeralrunnerset.kb.io,admissionReviewVersions=v1
 
 var _ admission.Defaulter[*EphemeralRunnerSet] = &EphemeralRunnerSet{}
 
@@ -52,7 +52,7 @@ func (r *EphemeralRunnerSet) Default(_ context.Context, obj *EphemeralRunnerSet)
 	return nil
 }
 
-// +kubebuilder:webhook:path=/validate-gha-walnuts-dev-v1alpha1-ephemeralrunnerset,mutating=false,failurePolicy=fail,sideEffects=None,groups=gha.walnuts.dev,resources=ephemeralrunnersets,verbs=create;update,versions=v1alpha1,name=vephemeralrunnerset.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-sharc.walnuts.dev-v1alpha1-ephemeralrunnerset,mutating=false,failurePolicy=fail,sideEffects=None,groups=sharc.walnuts.dev,resources=ephemeralrunnersets,verbs=create;update,versions=v1alpha1,name=vephemeralrunnerset.kb.io,admissionReviewVersions=v1
 
 var _ admission.Validator[*EphemeralRunnerSet] = &EphemeralRunnerSet{}
 

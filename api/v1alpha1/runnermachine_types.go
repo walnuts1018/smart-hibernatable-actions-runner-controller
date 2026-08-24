@@ -343,7 +343,7 @@ type RunnerMachineStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=rmachine;rm,categories=gha;all
+// +kubebuilder:resource:shortName=rmachine;rm,categories=sharc;all
 // +kubebuilder:printcolumn:name="Power State",type="string",JSONPath=".status.powerState",description="Observed power state"
 // +kubebuilder:printcolumn:name="Node Ready",type="boolean",JSONPath=".status.kubernetes.ready",description="Kubernetes Node readiness"
 // +kubebuilder:printcolumn:name="Priority",type="integer",JSONPath=".spec.priority",description="Scale-up priority"

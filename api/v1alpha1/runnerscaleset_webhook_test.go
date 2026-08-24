@@ -143,12 +143,12 @@ func TestRunnerScaleSetValidateCreate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "reserved label gha.walnuts.dev/managed-by",
+			name: "reserved label sharc.walnuts.dev/managed-by",
 			mutate: func(ss *RunnerScaleSet) {
 				if ss.Spec.Runner.Template.Labels == nil {
 					ss.Spec.Runner.Template.Labels = make(map[string]string)
 				}
-				ss.Spec.Runner.Template.Labels["gha.walnuts.dev/managed-by"] = "custom"
+				ss.Spec.Runner.Template.Labels["sharc.walnuts.dev/managed-by"] = "custom"
 			},
 			wantErr: true,
 		},

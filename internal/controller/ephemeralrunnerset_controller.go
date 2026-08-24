@@ -27,11 +27,11 @@ type EphemeralRunnerSetReconciler struct {
 	Recorder events.EventRecorder
 }
 
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=ephemeralrunnersets,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=ephemeralrunnersets/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=ephemeralrunnersets/finalizers,verbs=update
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=ephemeralrunners,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=ephemeralrunners/status,verbs=get
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunnersets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunnersets/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunnersets/finalizers,verbs=update
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunners,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunners/status,verbs=get
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 func (r *EphemeralRunnerSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

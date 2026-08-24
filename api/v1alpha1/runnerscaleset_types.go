@@ -324,7 +324,7 @@ type RunnerScaleSetStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=rscaleset;rss,categories=gha;all
+// +kubebuilder:resource:shortName=rscaleset;rss,categories=sharc;all
 // +kubebuilder:printcolumn:name="ScaleSetID",type="integer",JSONPath=".status.scaleSetID",description="GitHub ScaleSet ID"
 // +kubebuilder:printcolumn:name="Effective Max",type="integer",JSONPath=".status.effectiveMaxRunners",description="Effective max runners"
 // +kubebuilder:printcolumn:name="Active",type="integer",JSONPath=".status.activeRunners",description="Active runners count"

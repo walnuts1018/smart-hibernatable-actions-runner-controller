@@ -529,7 +529,7 @@ func TestRunnerMachineReconciler_MachineIDMismatchAndExplicitAdoption(t *testing
 		t.Errorf("expected machine Kubernetes.Ready to be false on mismatch")
 	}
 
-	// 2. 管理者が gha.walnuts.dev/adopt-machine-id アノテーションを付与した場合: 新MachineIDが採用されること
+	// 2. 管理者が sharc.walnuts.dev/adopt-machine-id アノテーションを付与した場合: 新MachineIDが採用されること
 	checkMachine.Annotations = map[string]string{
 		runner.AnnotationAdoptMachineID: "different-machine-id-456",
 	}

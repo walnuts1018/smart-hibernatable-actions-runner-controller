@@ -50,7 +50,7 @@ helm upgrade --install sharc \
 
 ```yaml
 # sharc-resources.yaml
-apiVersion: gha.walnuts.dev/v1alpha1
+apiVersion: sharc.walnuts.dev/v1alpha1
 kind: RunnerCluster
 metadata:
   name: gha-amd64
@@ -61,7 +61,7 @@ spec:
     key: kubeconfig
   runnerNamespace: gha-runners
 ---
-apiVersion: gha.walnuts.dev/v1alpha1
+apiVersion: sharc.walnuts.dev/v1alpha1
 kind: RunnerNodePool
 metadata:
   name: amd64
@@ -76,7 +76,7 @@ spec:
   drain:
     timeout: 10m
 ---
-apiVersion: gha.walnuts.dev/v1alpha1
+apiVersion: sharc.walnuts.dev/v1alpha1
 kind: RunnerMachine
 metadata:
   name: gha-amd64-01
@@ -100,7 +100,7 @@ spec:
     tls:
       insecureSkipVerify: true
 ---
-apiVersion: gha.walnuts.dev/v1alpha1
+apiVersion: sharc.walnuts.dev/v1alpha1
 kind: RunnerScaleSet
 metadata:
   name: sample-runners

@@ -2,12 +2,12 @@
 # since it depends on service name and namespace that are out of this kustomize package.
 # It should be run by config/default
 resources:
-- bases/gha.walnuts.dev_runnerclusters.yaml
-- bases/gha.walnuts.dev_runnermachines.yaml
-- bases/gha.walnuts.dev_runnernodepools.yaml
-- bases/gha.walnuts.dev_runnerscalesets.yaml
-- bases/gha.walnuts.dev_ephemeralrunnersets.yaml
-- bases/gha.walnuts.dev_ephemeralrunners.yaml
+- bases/sharc.walnuts.dev_runnerclusters.yaml
+- bases/sharc.walnuts.dev_runnermachines.yaml
+- bases/sharc.walnuts.dev_runnernodepools.yaml
+- bases/sharc.walnuts.dev_runnerscalesets.yaml
+- bases/sharc.walnuts.dev_ephemeralrunnersets.yaml
+- bases/sharc.walnuts.dev_ephemeralrunners.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

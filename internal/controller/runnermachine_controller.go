@@ -35,11 +35,11 @@ type RunnerMachineReconciler struct {
 	RedfishFactory redfish.PowerControllerFactory
 }
 
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnermachines,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnermachines/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnermachines/finalizers,verbs=update
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnernodepools,verbs=get;list;watch
-// +kubebuilder:rbac:groups=gha.walnuts.dev,resources=runnerclusters,verbs=get;list;watch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnermachines,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnermachines/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnermachines/finalizers,verbs=update
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnernodepools,verbs=get;list;watch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnerclusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
@@ -217,7 +217,7 @@ func (r *RunnerMachineReconciler) observeRemoteNode(
 	currentUID := string(node.UID)
 	currentMID := node.Status.NodeInfo.MachineID
 
-	// 管理者による明示的な Adopt (gha.walnuts.dev/adopt-machine-id アノテーション) の検証
+	// 管理者による明示的な Adopt (sharc.walnuts.dev/adopt-machine-id アノテーション) の検証
 	adoptMID, hasAdopt := machine.Annotations[runner.AnnotationAdoptMachineID]
 	if hasAdopt && adoptMID == currentMID && currentMID != "" {
 		log.Info("adopting new machine identity from annotation", "machine", machine.Name, "newMachineID", currentMID)
