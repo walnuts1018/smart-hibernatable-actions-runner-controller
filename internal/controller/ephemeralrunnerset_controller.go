@@ -120,8 +120,7 @@ func (r *EphemeralRunnerSetReconciler) Reconcile(ctx context.Context, req ctrl.R
 			if excess <= 0 {
 				break
 			}
-			if run.DeletionTimestamp.IsZero() && (
-				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhasePending ||
+			if run.DeletionTimestamp.IsZero() && (run.Status.Phase == ghav1alpha1.EphemeralRunnerPhasePending ||
 				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseWaitingForCluster ||
 				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseIdle) {
 				if err := r.Delete(ctx, run); err != nil {
