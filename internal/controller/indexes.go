@@ -105,3 +105,13 @@ func SetupIndexesWithManager(mgr ctrl.Manager) error {
 
 	return nil
 }
+
+// listWithIndexFallback lists objects using an index field, falling back to a full namespace list if indexing is unavailable.
+func listWithIndexFallback(ctx context.Context, c client.Reader, list client.ObjectList, namespace, indexField, indexValue string) error {
+	if err := c.List(ctx, list, client.InNamespace(namespace), client.MatchingFields{
+		indexField: indexValue,
+	}); err != nil {
+		return c.List(ctx, list, client.InNamespace(namespace))
+	}
+	return nil
+}

@@ -93,8 +93,7 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// 3. CapacityLimit / EffectiveMaxRunners の計算
-	declaredCapacity, err := r.reconcileCapacity(ctx, &scaleSet)
-	if err != nil {
+	if _, err := r.reconcileCapacity(ctx, &scaleSet); err != nil {
 		log.Error(err, "failed to reconcile capacity")
 		if updateErr := r.updateStatus(ctx, &scaleSet, origScaleSet); updateErr != nil {
 			log.Error(updateErr, "failed to update status")
@@ -112,7 +111,7 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// 5. EphemeralRunnerSet リソースの同期
-	if err := r.reconcileEphemeralRunnerSet(ctx, &scaleSet, declaredCapacity); err != nil {
+	if err := r.reconcileEphemeralRunnerSet(ctx, &scaleSet); err != nil {
 		log.Error(err, "failed to reconcile ephemeral runner set")
 		if updateErr := r.updateStatus(ctx, &scaleSet, origScaleSet); updateErr != nil {
 			log.Error(updateErr, "failed to update status")
@@ -623,7 +622,7 @@ func (r *RunnerScaleSetReconciler) reconcileListenerDeployment(ctx context.Conte
 	return applyResource(ctx, r.Client, desiredDeploy)
 }
 
-func (r *RunnerScaleSetReconciler) reconcileEphemeralRunnerSet(ctx context.Context, ss *ghav1alpha1.RunnerScaleSet, declaredCapacity int32) error {
+func (r *RunnerScaleSetReconciler) reconcileEphemeralRunnerSet(ctx context.Context, ss *ghav1alpha1.RunnerScaleSet) error {
 	log := logf.FromContext(ctx)
 
 	// ScaleSet に紐づく EphemeralRunnerSet を取得または作成
@@ -638,14 +637,12 @@ func (r *RunnerScaleSetReconciler) reconcileEphemeralRunnerSet(ctx context.Conte
 		log.Info("creating EphemeralRunnerSet for RunnerScaleSet", "scaleSet", ss.Name)
 		zero := int32(0)
 		ers = ghav1alpha1.EphemeralRunnerSet{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      ersName,
-				Namespace: ss.Namespace,
-				Labels: map[string]string{
-					runner.LabelManagedBy:    runner.LabelManagedByValue,
-					runner.LabelScaleSetUID:  string(ss.UID),
-					runner.LabelScaleSetName: ss.Name,
-				},
+			Name:      ersName,
+			Namespace: ss.Namespace,
+			Labels: map[string]string{
+				runner.LabelManagedBy:    runner.LabelManagedByValue,
+				runner.LabelScaleSetUID:  string(ss.UID),
+				runner.LabelScaleSetName: ss.Name,
 			},
 			Spec: ghav1alpha1.EphemeralRunnerSetSpec{
 				ScaleSetRef: corev1.LocalObjectReference{
@@ -725,20 +722,15 @@ func (r *RunnerScaleSetReconciler) findScaleSetsForNodePool(ctx context.Context,
 	}
 
 	var scaleSets ghav1alpha1.RunnerScaleSetList
-	if err := r.List(ctx, &scaleSets, client.InNamespace(pool.Namespace), client.MatchingFields{
-		IndexNodePoolRefName: pool.Name,
-	}); err != nil {
-		if err := r.List(ctx, &scaleSets, client.InNamespace(pool.Namespace)); err != nil {
-			return nil
-		}
+	if err := listWithIndexFallback(ctx, r.Client, &scaleSets, pool.Namespace, IndexNodePoolRefName, pool.Name); err != nil {
+		return nil
 	}
 
 	var requests []ctrl.Request
 	for _, ss := range scaleSets.Items {
 		if ss.Spec.NodePoolRef.Name == pool.Name {
 			requests = append(requests, ctrl.Request{
-				Namespace: ss.Namespace,
-				Name:      ss.Name,
+				NamespacedName: client.ObjectKeyFromObject(&ss),
 			})
 		}
 	}

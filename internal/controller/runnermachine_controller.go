@@ -77,11 +77,7 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// 2. 所属するRunnerNodePoolからDesiredStateとDrain開始時刻を取得
-	desiredState, drainStartedAt, nodePool, err := r.getDesiredState(ctx, &machine, &cluster)
-	if err != nil {
-		log.Error(err, "failed to get desired state from node pool")
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-	}
+	desiredState, drainStartedAt, nodePool := r.getDesiredState(ctx, &machine, &cluster)
 
 	// 3. Redfish BMCから最新の電源状態を観測
 	pwrCtrl := r.observeRedfish(ctx, &machine, skipRedfish)
@@ -579,86 +575,100 @@ func (r *RunnerMachineReconciler) reconcileOff(
 
 	// 3. 電源ONの場合: Drainingおよび安全なスケールダウン判定
 	if m.Status.PowerState == ghav1alpha1.PowerStateOn {
-		// 3.1 NodeをCordonして新規Podのスケジュールを阻止（外部Cordonは所有権を奪わず検知）
-		if cluster.Status.APIReachable && remoteNode != nil {
-			remoteClient, clientErr := r.RemoteProvider.GetClient(ctx, cluster)
-			if clientErr == nil {
-				ownership, cordonErr := r.ensureCordoned(ctx, remoteClient, remoteNode, m.UID)
-				if cordonErr != nil {
-					log.Error(cordonErr, "failed to ensure node cordoned", "node", remoteNode.Name)
-				}
-				if ownership == CordonExternal {
-					m.Status.ExternallyCordoned = true
-					log.Info("node is cordoned by external actor, blocking scale-down power off", "node", remoteNode.Name)
-					conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonExternalCordon, "Node is cordoned externally; scale down power off is blocked")
-					return 30 * time.Second
-				}
-				m.Status.ExternallyCordoned = false
-			}
-		}
-
-		// 3.2 このNode上で現在実行中のRunner Podが存在するか確認 (Fail closed)
-		activePodCount, countErr := r.countActiveRunnerPodsOnNode(ctx, cluster, m.Spec.NodeName)
-		if countErr != nil {
-			log.Error(countErr, "failed to count active runner pods on node, retrying safely", "machine", m.Name)
-			return 5 * time.Second
-		}
-		if activePodCount > 0 {
-			drainTimeout := 10 * time.Minute
-			if m.Spec.Drain != nil && m.Spec.Drain.Timeout != nil && m.Spec.Drain.Timeout.Duration > 0 {
-				drainTimeout = m.Spec.Drain.Timeout.Duration
-			} else if nodePool != nil && nodePool.Spec.Drain != nil && nodePool.Spec.Drain.Timeout != nil && nodePool.Spec.Drain.Timeout.Duration > 0 {
-				drainTimeout = nodePool.Spec.Drain.Timeout.Duration
-			}
-
-			if drainStartedAt != nil && time.Since(drainStartedAt.Time) > drainTimeout {
-				log.Info("drain timed out with active runner pods; blocking scale-down power off to protect running jobs", "machine", m.Name, "activePods", activePodCount, "timeout", drainTimeout)
-				conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeReady, metav1.ConditionFalse, "DrainTimedOut", fmt.Sprintf("Drain timed out after %s with %d active pods; scale-down power off blocked", drainTimeout, activePodCount))
-				return 30 * time.Second
-			}
-			log.Info("machine has active runner pods, waiting for drain", "machine", m.Name, "activePods", activePodCount)
-			conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonDraining, fmt.Sprintf("Waiting for %d runner pods to finish", activePodCount))
-			return 5 * time.Second
-		}
-
-		// 3.3 Cordon 後の Quiescence window (スケジューラの in-flight bind 完了待機)
-		if drainStartedAt != nil {
-			quiescenceWindow := 10 * time.Second
-			drainElapsed := time.Since(drainStartedAt.Time)
-			if drainElapsed < quiescenceWindow {
-				log.Info("waiting for cordon quiescence window before shutting down", "machine", m.Name, "elapsed", drainElapsed)
-				return 5 * time.Second
-			}
-		}
-
-		// 3.4 ScaleDownDelayの確認
-		scaleDownDelay := 10 * time.Minute
-		if nodePool != nil && nodePool.Spec.Scaling.ScaleDownDelay != nil && nodePool.Spec.Scaling.ScaleDownDelay.Duration > 0 {
-			scaleDownDelay = nodePool.Spec.Scaling.ScaleDownDelay.Duration
-		}
-
-		if drainStartedAt != nil {
-			drainElapsed := time.Since(drainStartedAt.Time)
-			if drainElapsed < scaleDownDelay {
-				remaining := scaleDownDelay - drainElapsed
-				log.Info("machine scale-down delayed by ScaleDownDelay", "machine", m.Name, "remaining", remaining)
-				return 10 * time.Second
-			}
-		}
-
-		// 3.5 30秒以内の重複GracefulShutdownを抑止
-		if m.Status.Operation != nil && m.Status.Operation.Type == ghav1alpha1.PowerOperationTypeGracefulShutdown {
-			if time.Since(m.Status.Operation.LastAttemptAt.Time) < 30*time.Second {
-				return 10 * time.Second
-			}
-		}
-
-		// 3.6 GracefulShutdownの発行
-		r.initiateGracefulShutdown(ctx, m, pwrCtrl)
-		return 10 * time.Second
+		return r.reconcilePowerOffForRunningMachine(ctx, m, cluster, nodePool, remoteNode, pwrCtrl, drainStartedAt)
 	}
 
 	return 30 * time.Second
+}
+
+func (r *RunnerMachineReconciler) reconcilePowerOffForRunningMachine(
+	ctx context.Context,
+	m *ghav1alpha1.RunnerMachine,
+	cluster *ghav1alpha1.RunnerCluster,
+	nodePool *ghav1alpha1.RunnerNodePool,
+	remoteNode *corev1.Node,
+	pwrCtrl redfish.PowerController,
+	drainStartedAt *metav1.Time,
+) time.Duration {
+	log := logf.FromContext(ctx)
+
+	// 3.1 NodeをCordonして新規Podのスケジュールを阻止（外部Cordonは所有権を奪わず検知）
+	if cluster.Status.APIReachable && remoteNode != nil {
+		remoteClient, clientErr := r.RemoteProvider.GetClient(ctx, cluster)
+		if clientErr == nil {
+			ownership, cordonErr := r.ensureCordoned(ctx, remoteClient, remoteNode, m.UID)
+			if cordonErr != nil {
+				log.Error(cordonErr, "failed to ensure node cordoned", "node", remoteNode.Name)
+			}
+			if ownership == CordonExternal {
+				m.Status.ExternallyCordoned = true
+				log.Info("node is cordoned by external actor, blocking scale-down power off", "node", remoteNode.Name)
+				conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonExternalCordon, "Node is cordoned externally; scale down power off is blocked")
+				return 30 * time.Second
+			}
+			m.Status.ExternallyCordoned = false
+		}
+	}
+
+	// 3.2 このNode上で現在実行中のRunner Podが存在するか確認 (Fail closed)
+	activePodCount, countErr := r.countActiveRunnerPodsOnNode(ctx, cluster, m.Spec.NodeName)
+	if countErr != nil {
+		log.Error(countErr, "failed to count active runner pods on node, retrying safely", "machine", m.Name)
+		return 5 * time.Second
+	}
+	if activePodCount > 0 {
+		drainTimeout := 10 * time.Minute
+		if m.Spec.Drain != nil && m.Spec.Drain.Timeout != nil && m.Spec.Drain.Timeout.Duration > 0 {
+			drainTimeout = m.Spec.Drain.Timeout.Duration
+		} else if nodePool != nil && nodePool.Spec.Drain != nil && nodePool.Spec.Drain.Timeout != nil && nodePool.Spec.Drain.Timeout.Duration > 0 {
+			drainTimeout = nodePool.Spec.Drain.Timeout.Duration
+		}
+
+		if drainStartedAt != nil && time.Since(drainStartedAt.Time) > drainTimeout {
+			log.Info("drain timed out with active runner pods; blocking scale-down power off to protect running jobs", "machine", m.Name, "activePods", activePodCount, "timeout", drainTimeout)
+			conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeReady, metav1.ConditionFalse, "DrainTimedOut", fmt.Sprintf("Drain timed out after %s with %d active pods; scale-down power off blocked", drainTimeout, activePodCount))
+			return 30 * time.Second
+		}
+		log.Info("machine has active runner pods, waiting for drain", "machine", m.Name, "activePods", activePodCount)
+		conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonDraining, fmt.Sprintf("Waiting for %d runner pods to finish", activePodCount))
+		return 5 * time.Second
+	}
+
+	// 3.3 Cordon 後の Quiescence window (スケジューラの in-flight bind 完了待機)
+	if drainStartedAt != nil {
+		quiescenceWindow := 10 * time.Second
+		drainElapsed := time.Since(drainStartedAt.Time)
+		if drainElapsed < quiescenceWindow {
+			log.Info("waiting for cordon quiescence window before shutting down", "machine", m.Name, "elapsed", drainElapsed)
+			return 5 * time.Second
+		}
+	}
+
+	// 3.4 ScaleDownDelayの確認
+	scaleDownDelay := 10 * time.Minute
+	if nodePool != nil && nodePool.Spec.Scaling.ScaleDownDelay != nil && nodePool.Spec.Scaling.ScaleDownDelay.Duration > 0 {
+		scaleDownDelay = nodePool.Spec.Scaling.ScaleDownDelay.Duration
+	}
+
+	if drainStartedAt != nil {
+		drainElapsed := time.Since(drainStartedAt.Time)
+		if drainElapsed < scaleDownDelay {
+			remaining := scaleDownDelay - drainElapsed
+			log.Info("machine scale-down delayed by ScaleDownDelay", "machine", m.Name, "remaining", remaining)
+			return 10 * time.Second
+		}
+	}
+
+	// 3.5 30秒以内の重複GracefulShutdownを抑止
+	if m.Status.Operation != nil && m.Status.Operation.Type == ghav1alpha1.PowerOperationTypeGracefulShutdown {
+		if time.Since(m.Status.Operation.LastAttemptAt.Time) < 30*time.Second {
+			return 10 * time.Second
+		}
+	}
+
+	// 3.6 GracefulShutdownの発行
+	r.initiateGracefulShutdown(ctx, m, pwrCtrl)
+	return 10 * time.Second
 }
 
 func (r *RunnerMachineReconciler) handleShutdownTimeout(
@@ -779,13 +789,13 @@ func (r *RunnerMachineReconciler) countActiveRunnerPodsOnNode(ctx context.Contex
 	return count, nil
 }
 
-func (r *RunnerMachineReconciler) getDesiredState(ctx context.Context, m *ghav1alpha1.RunnerMachine, cluster *ghav1alpha1.RunnerCluster) (ghav1alpha1.MachineDesiredState, *metav1.Time, *ghav1alpha1.RunnerNodePool, error) {
+func (r *RunnerMachineReconciler) getDesiredState(ctx context.Context, m *ghav1alpha1.RunnerMachine, cluster *ghav1alpha1.RunnerCluster) (ghav1alpha1.MachineDesiredState, *metav1.Time, *ghav1alpha1.RunnerNodePool) {
 	// 1. Startup マシン判定: クラスタがオフラインまたは起動中で、このマシンが startup.machineRefs に含まれる場合は Active
 	if cluster != nil && cluster.Spec.Startup != nil {
 		for _, sRef := range cluster.Spec.Startup.MachineRefs {
 			if sRef.Name == m.Name {
 				if !cluster.Status.APIReachable {
-					return ghav1alpha1.MachineDesiredStateActive, nil, nil, nil
+					return ghav1alpha1.MachineDesiredStateActive, nil, nil
 				}
 			}
 		}
@@ -797,15 +807,15 @@ func (r *RunnerMachineReconciler) getDesiredState(ctx context.Context, m *ghav1a
 		if err := r.Get(ctx, client.ObjectKey{Namespace: m.Namespace, Name: m.Spec.NodePoolRef.Name}, &pool); err == nil {
 			for _, dm := range pool.Status.DesiredMachines {
 				if dm.Name == m.Name || (dm.UID != "" && dm.UID == string(m.UID)) {
-					return dm.DesiredState, dm.DrainStartedAt, &pool, nil
+					return dm.DesiredState, dm.DrainStartedAt, &pool
 				}
 			}
-			return ghav1alpha1.MachineDesiredStateOff, nil, &pool, nil
+			return ghav1alpha1.MachineDesiredStateOff, nil, &pool
 		}
 	}
 
 	// どのPoolにも属していない場合はOff
-	return ghav1alpha1.MachineDesiredStateOff, nil, nil, nil
+	return ghav1alpha1.MachineDesiredStateOff, nil, nil
 }
 
 func (r *RunnerMachineReconciler) getRedfishController(ctx context.Context, m *ghav1alpha1.RunnerMachine) (redfish.PowerController, error) {
@@ -855,10 +865,7 @@ func (r *RunnerMachineReconciler) recordRedfishFailure(m *ghav1alpha1.RunnerMach
 	// サーキットブレーカー: 5回連続失敗でOpenに遷移し指数バックオフ (cap 10分)
 	if failures >= 5 {
 		m.Status.RedfishHealth.Circuit = ghav1alpha1.RedfishCircuitOpen
-		backoff := 30 * time.Second * time.Duration(1<<(failures-5))
-		if backoff > 10*time.Minute {
-			backoff = 10 * time.Minute
-		}
+		backoff := min(30*time.Second*time.Duration(1<<(failures-5)), 10*time.Minute)
 		nextProbe := metav1.NewTime(at.Add(backoff))
 		m.Status.RedfishHealth.NextProbeTime = &nextProbe
 	}
@@ -884,20 +891,15 @@ func (r *RunnerMachineReconciler) findMachinesForNodePool(ctx context.Context, o
 	}
 
 	var machines ghav1alpha1.RunnerMachineList
-	if err := r.List(ctx, &machines, client.InNamespace(pool.Namespace), client.MatchingFields{
-		IndexMachineNodePoolRefName: pool.Name,
-	}); err != nil {
-		if err := r.List(ctx, &machines, client.InNamespace(pool.Namespace)); err != nil {
-			return nil
-		}
+	if err := listWithIndexFallback(ctx, r.Client, &machines, pool.Namespace, IndexMachineNodePoolRefName, pool.Name); err != nil {
+		return nil
 	}
 
 	var requests []ctrl.Request
 	for _, m := range machines.Items {
 		if m.Spec.NodePoolRef != nil && m.Spec.NodePoolRef.Name == pool.Name {
 			requests = append(requests, ctrl.Request{
-				Namespace: m.Namespace,
-				Name:      m.Name,
+				NamespacedName: client.ObjectKeyFromObject(&m),
 			})
 		}
 	}
@@ -911,20 +913,15 @@ func (r *RunnerMachineReconciler) findMachinesForCluster(ctx context.Context, ob
 	}
 
 	var machines ghav1alpha1.RunnerMachineList
-	if err := r.List(ctx, &machines, client.InNamespace(cluster.Namespace), client.MatchingFields{
-		IndexClusterRefName: cluster.Name,
-	}); err != nil {
-		if err := r.List(ctx, &machines, client.InNamespace(cluster.Namespace)); err != nil {
-			return nil
-		}
+	if err := listWithIndexFallback(ctx, r.Client, &machines, cluster.Namespace, IndexClusterRefName, cluster.Name); err != nil {
+		return nil
 	}
 
 	var requests []ctrl.Request
 	for _, m := range machines.Items {
 		if m.Spec.ClusterRef.Name == cluster.Name {
 			requests = append(requests, ctrl.Request{
-				Namespace: m.Namespace,
-				Name:      m.Name,
+				NamespacedName: client.ObjectKeyFromObject(&m),
 			})
 		}
 	}

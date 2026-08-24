@@ -80,13 +80,11 @@ func (r *EphemeralRunnerSetReconciler) Reconcile(ctx context.Context, req ctrl.R
 		for range diff {
 			runnerName := runner.GenerateRunnerName(ers.Spec.ScaleSetRef.Name)
 			newRunner := &ghav1alpha1.EphemeralRunner{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      runnerName,
-					Namespace: ers.Namespace,
-					Labels: map[string]string{
-						runner.LabelManagedBy:    runner.LabelManagedByValue,
-						runner.LabelScaleSetName: ers.Spec.ScaleSetRef.Name,
-					},
+				Name:      runnerName,
+				Namespace: ers.Namespace,
+				Labels: map[string]string{
+					runner.LabelManagedBy:    runner.LabelManagedByValue,
+					runner.LabelScaleSetName: ers.Spec.ScaleSetRef.Name,
 				},
 				Spec: ghav1alpha1.EphemeralRunnerSpec{
 					ScaleSetRef: corev1.LocalObjectReference{
