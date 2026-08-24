@@ -35,7 +35,7 @@ jobs:
             os: ubuntu-26.04
             platform: linux/amd64
           - key: linux-arm64
-            os: ubuntu-26.04-arm64
+            os: ubuntu-24.04-arm64
             platform: linux/arm64
     steps:
       - name: Check out code
@@ -214,4 +214,3 @@ jobs:
             exit 1
           fi
           helm push "${packages[0]}" "oci://${REGISTRY}/${{ github.repository_owner }}/charts"
-
