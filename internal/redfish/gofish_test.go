@@ -36,51 +36,6 @@ func TestNewGofishController_Validation(t *testing.T) {
 		}
 	})
 
-	t.Run("accepts https endpoint with trailing slash and fetches power state", func(t *testing.T) {
-		spec := ghav1alpha1.RedfishSpec{
-			Endpoint: fakeBMC.URL() + "/",
-			SystemID: "1",
-			TLS: ghav1alpha1.RedfishTLSSpec{
-				InsecureSkipVerify: true,
-			},
-		}
-		ctrl, err := NewGofishController(spec, "user", "pass", nil)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if ctrl == nil {
-			t.Fatal("expected controller to be non-nil")
-		}
-		state, err := ctrl.GetPowerState(context.Background())
-		if err != nil {
-			t.Fatalf("unexpected error with trailing slash endpoint: %v", err)
-		}
-		if state != ghav1alpha1.PowerStateOff {
-			t.Fatalf("expected Off, got %v", state)
-		}
-	})
-
-	t.Run("accepts https endpoint with /redfish/v1/ suffix and fetches power state", func(t *testing.T) {
-		spec := ghav1alpha1.RedfishSpec{
-			Endpoint: fakeBMC.URL() + "/redfish/v1/",
-			SystemID: "1",
-			TLS: ghav1alpha1.RedfishTLSSpec{
-				InsecureSkipVerify: true,
-			},
-		}
-		ctrl, err := NewGofishController(spec, "user", "pass", nil)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		state, err := ctrl.GetPowerState(context.Background())
-		if err != nil {
-			t.Fatalf("unexpected error with /redfish/v1/ endpoint: %v", err)
-		}
-		if state != ghav1alpha1.PowerStateOff {
-			t.Fatalf("expected Off, got %v", state)
-		}
-	})
-
 	t.Run("rejects invalid CA certificate PEM", func(t *testing.T) {
 		spec := ghav1alpha1.RedfishSpec{
 			Endpoint: "https://127.0.0.1:8000",

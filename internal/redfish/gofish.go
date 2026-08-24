@@ -31,18 +31,9 @@ var (
 	endpointGates          = make(map[string]*endpointGate)
 )
 
-func normalizeEndpoint(endpoint string) string {
-	ep := strings.TrimSpace(endpoint)
-	ep = strings.TrimRight(ep, "/")
-	ep = strings.TrimSuffix(ep, "/redfish/v1")
-	ep = strings.TrimRight(ep, "/")
-	ep = strings.TrimSuffix(ep, "/redfish")
-	return strings.TrimRight(ep, "/")
-}
-
 func getEndpointGate(rawEndpoint string) *endpointGate {
-	endpointKey := normalizeEndpoint(rawEndpoint)
-	if parsed, err := url.Parse(endpointKey); err == nil && parsed.Host != "" {
+	endpointKey := rawEndpoint
+	if parsed, err := url.Parse(rawEndpoint); err == nil && parsed.Host != "" {
 		endpointKey = fmt.Sprintf("%s://%s", parsed.Scheme, parsed.Host)
 	}
 
@@ -82,7 +73,6 @@ type gofishController struct {
 
 // NewGofishController creates a new PowerController backed by gofish.
 func NewGofishController(spec ghav1alpha1.RedfishSpec, username, password string, caCert []byte) (PowerController, error) {
-	spec.Endpoint = normalizeEndpoint(spec.Endpoint)
 	u, err := url.Parse(spec.Endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("invalid Redfish endpoint: %w", err)
