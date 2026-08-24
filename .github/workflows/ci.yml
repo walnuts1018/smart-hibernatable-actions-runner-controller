@@ -47,6 +47,8 @@ jobs:
           if [ ! -x bin/custom-gcl ]; then
             mise run build-golangci-lint
           fi
+          ln -sf custom-gcl bin/golangci-lint
+          echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
 
       - parallel:
           - name: Validate workflows and shell scripts
@@ -54,7 +56,9 @@ jobs:
           - name: Lint Helm chart
             run: mise run lint:chart
           - name: Run golangci-lint
-            run: mise run lint
+            uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+            with:
+              install-mode: "none"
           - name: Run unit tests
             run: mise run test
           - name: Run e2e tests

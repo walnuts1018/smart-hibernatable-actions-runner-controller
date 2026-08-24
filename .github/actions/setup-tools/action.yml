@@ -10,7 +10,7 @@ inputs:
     required: false
     default: "true"
   golangci-lint-cache:
-    description: Whether to enable golangci-lint cache
+    description: Whether to enable custom golangci-lint binary cache
     required: false
     default: "false"
 
@@ -27,15 +27,6 @@ runs:
         key: go-cache-${{ runner.os }}-${{ hashFiles('go.sum') }}
         restore-keys: |
           go-cache-${{ runner.os }}-
-
-    - name: golangci-lint cache
-      if: inputs.golangci-lint-cache == 'true'
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: ~/.cache/golangci-lint
-        key: golangci-lint-${{ runner.os }}-${{ hashFiles('go.sum', 'mise.toml', '.golangci.yml', '.custom-gcl.yml') }}
-        restore-keys: |
-          golangci-lint-${{ runner.os }}-
 
     - name: Custom golangci-lint binary cache
       if: inputs.golangci-lint-cache == 'true'

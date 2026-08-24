@@ -53,11 +53,11 @@ spec:
             {{- end }}
             {{- if eq .Values.otel.metricsExporter "otlp" }}
             {{- with .Values.otel.exporter.endpoint }}
-            - name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ . | quote }}
             {{- end }}
             {{- with .Values.otel.exporter.protocol }}
-            - name: OTEL_EXPORTER_OTLP_METRICS_PROTOCOL
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
               value: {{ . | quote }}
             {{- end }}
             {{- end }}

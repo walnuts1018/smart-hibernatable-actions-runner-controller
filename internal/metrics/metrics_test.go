@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -29,5 +30,37 @@ func TestPrometheusExporterCollectsOpenTelemetryMetrics(t *testing.T) {
 	}
 	if !strings.Contains(body, `gha_baremetal_power_transitions_total{action="PowerOn",name="machine",namespace="default"} 1`) {
 		t.Errorf("Prometheus output does not preserve the counter name: %s", body)
+	}
+}
+
+func TestOTLPHTTPExporter(t *testing.T) {
+	var requestedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	t.Setenv("OTEL_METRICS_EXPORTER", "otlp")
+	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", srv.URL)
+	t.Setenv("OTEL_METRIC_EXPORT_INTERVAL", "100")
+
+	if err := Setup(t.Context(), "metrics-test-otlp"); err != nil {
+		t.Fatalf("Setup() error = %v", err)
+	}
+	defer func() {
+		_ = Shutdown(context.Background())
+	}()
+
+	AvailableJobs.WithLabelValues("default", "example").Set(1)
+
+	// Trigger export via shutdown or wait
+	if err := provider.ForceFlush(t.Context()); err != nil {
+		t.Fatalf("ForceFlush() error = %v", err)
+	}
+
+	if requestedPath != "/v1/metrics" {
+		t.Errorf("Expected request path to be /v1/metrics, got %s", requestedPath)
 	}
 }
