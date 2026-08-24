@@ -58,6 +58,17 @@ resources:
     namespaced: true
   domain: walnuts.dev
   group: gha
+  kind: EphemeralRunnerSet
+  path: github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1
+  version: v1alpha1
+  webhooks:
+    defaulting: true
+    validation: true
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: walnuts.dev
+  group: gha
   kind: EphemeralRunner
   path: github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1
   version: v1alpha1

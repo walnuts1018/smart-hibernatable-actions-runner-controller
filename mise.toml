@@ -107,7 +107,7 @@ run = "go run ./cmd/main.go"
 
 [tasks.docker-build]
 description = "Build docker image with the manager"
-run = 'docker build -t "${IMG:-controller:latest}" .'
+run = 'docker build --target manager -t "${IMG:-controller:latest}" .'
 
 [tasks.docker-push]
 description = "Push docker image with the manager"
@@ -125,7 +125,7 @@ kustomize build config/default > dist/install.yaml
 [tasks.install]
 description = "Install CRDs into the K8s cluster specified in ~/.kube/config"
 depends = ["manifests"]
-run = "kustomize build config/crd | kubectl apply -f -"
+run = "kustomize build config/crd | kubectl apply --server-side -f -"
 
 [tasks.uninstall]
 description = "Uninstall CRDs from the K8s cluster specified in ~/.kube/config"
@@ -138,7 +138,7 @@ depends = ["manifests"]
 run = """
 IMG="${IMG:-controller:latest}"
 (cd config/manager && kustomize edit set image controller="${IMG}")
-kustomize build config/default | kubectl apply -f -
+kustomize build config/default | kubectl apply --server-side -f -
 """
 
 [tasks.undeploy]
