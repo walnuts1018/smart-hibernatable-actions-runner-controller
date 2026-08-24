@@ -2,7 +2,7 @@
 version: "2"
 run:
   allow-parallel-runners: true
-  timeout: 5m
+  timeout: 10m
 linters:
   default: none
   enable:

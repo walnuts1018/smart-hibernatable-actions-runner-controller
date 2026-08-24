@@ -3,11 +3,13 @@ replicaCount: 1
 image:
   repository: ghcr.io/walnuts1018/smart-hibernatable-actions-runner-controller/manager
   pullPolicy: IfNotPresent
-  tag: "latest"
+  # Overrides the image tag whose default is the chart appVersion (prefixed with 'v').
+  tag: ""
 
 listenerImage:
   repository: ghcr.io/walnuts1018/smart-hibernatable-actions-runner-controller/listener
-  tag: "latest"
+  # Overrides the image tag whose default is the chart appVersion (prefixed with 'v').
+  tag: ""
 
 imagePullSecrets: []
 nameOverride: ""

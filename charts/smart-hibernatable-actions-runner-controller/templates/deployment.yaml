@@ -26,7 +26,7 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: manager
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" (.Chart.AppVersion | trimPrefix "v")) }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
           - /manager
@@ -34,7 +34,7 @@ spec:
           - --leader-elect
           - --health-probe-bind-address=:8081
           {{- if .Values.listenerImage.repository }}
-          - --listener-image={{ .Values.listenerImage.repository }}:{{ .Values.listenerImage.tag | default .Chart.AppVersion }}
+          - --listener-image={{ .Values.listenerImage.repository }}:{{ .Values.listenerImage.tag | default (printf "v%s" (.Chart.AppVersion | trimPrefix "v")) }}
           {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
