@@ -118,8 +118,11 @@ description = "Generate a consolidated YAML with CRDs and deployment"
 run = """
 IMG="${IMG:-controller:latest}"
 mkdir -p dist
-(cd config/manager && kustomize edit set image controller="${IMG}")
-kustomize build config/default > dist/install.yaml
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+cp -r config "$tmpdir/"
+(cd "$tmpdir/config/manager" && kustomize edit set image controller="${IMG}")
+kustomize build "$tmpdir/config/default" > dist/install.yaml
 """
 
 [tasks.install]
@@ -137,8 +140,11 @@ description = "Deploy controller to the K8s cluster specified in ~/.kube/config"
 depends = ["manifests"]
 run = """
 IMG="${IMG:-controller:latest}"
-(cd config/manager && kustomize edit set image controller="${IMG}")
-kustomize build config/default | kubectl apply --server-side -f -
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+cp -r config "$tmpdir/"
+(cd "$tmpdir/config/manager" && kustomize edit set image controller="${IMG}")
+kustomize build "$tmpdir/config/default" | kubectl apply --server-side -f -
 """
 
 [tasks.undeploy]
