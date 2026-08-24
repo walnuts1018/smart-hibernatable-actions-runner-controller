@@ -3,27 +3,45 @@ package githubscaleset
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/actions/scaleset"
 	"github.com/actions/scaleset/listener"
 )
 
-// ScaleSetStatistics represents runner scale set statistics from GitHub Actions.
-type ScaleSetStatistics struct {
-	TotalAssignedJobs      int
-	TotalRunningJobs       int
-	TotalRegisteredRunners int
-	TotalBusyRunners       int
-	TotalIdleRunners       int
-	UpdatedAt              time.Time
-}
-
 // JITConfigResponse holds JIT configuration and assigned GitHub Runner reference.
 type JITConfigResponse struct {
 	RunnerID         int64
 	RunnerName       string
 	EncodedJITConfig string
+}
+
+// ListenerSession manages the lifecycle of a listener and its underlying message session.
+type ListenerSession interface {
+	Run(ctx context.Context, scaler listener.Scaler) error
+	SetMaxRunners(count int)
+	Close(ctx context.Context) error
+}
+
+type listenerSessionImpl struct {
+	listener      *listener.Listener
+	sessionClient *scaleset.MessageSessionClient
+}
+
+func (s *listenerSessionImpl) Run(ctx context.Context, scaler listener.Scaler) error {
+	return s.listener.Run(ctx, scaler)
+}
+
+func (s *listenerSessionImpl) SetMaxRunners(count int) {
+	s.listener.SetMaxRunners(count)
+}
+
+func (s *listenerSessionImpl) Close(ctx context.Context) error {
+	if s.sessionClient != nil {
+		return s.sessionClient.Close(ctx)
+	}
+	return nil
 }
 
 // ScaleSetClient defines operations on GitHub Actions Scale Sets.
@@ -44,24 +62,7 @@ type ScaleSetClient interface {
 	RemoveRunner(ctx context.Context, runnerID int64) error
 
 	// CreateListenerSession creates a new listener session (including MessageSessionClient) for this scale set.
-	CreateListenerSession(ctx context.Context, scaleSetID int64, maxCapacity int, scaler listener.Scaler, recorder listener.MetricsRecorder) (*ListenerSession, error)
-
-	// CreateListener creates a new listener instance for this scale set (for backward compatibility).
-	CreateListener(ctx context.Context, scaleSetID int64, maxCapacity int, scaler listener.Scaler, recorder listener.MetricsRecorder) (*listener.Listener, error)
-}
-
-// ListenerSession pairs a Listener with its underlying MessageSessionClient for graceful shutdown.
-type ListenerSession struct {
-	Listener      *listener.Listener
-	SessionClient *scaleset.MessageSessionClient
-}
-
-// Close gracefully closes the GitHub Actions message session.
-func (s *ListenerSession) Close(ctx context.Context) error {
-	if s.SessionClient != nil {
-		return s.SessionClient.Close(ctx)
-	}
-	return nil
+	CreateListenerSession(ctx context.Context, scaleSetID int64, owner string, maxCapacity int, recorder listener.MetricsRecorder) (ListenerSession, error)
 }
 
 // ScaleSetClientFactory creates ScaleSetClient instances.
@@ -82,16 +83,21 @@ func (f *defaultClientFactory) NewClient(configURL string, auth *scaleset.GitHub
 
 type clientImpl struct {
 	rawClient *scaleset.Client
-	configURL string
 }
 
 // NewClient creates a new ScaleSetClient.
 func NewClient(configURL string, auth *scaleset.GitHubAppAuth) (ScaleSetClient, error) {
+	if auth == nil {
+		return nil, fmt.Errorf("GitHub App auth is required")
+	}
+
 	rawClient, err := scaleset.NewClientWithGitHubApp(scaleset.ClientWithGitHubAppConfig{
 		GitHubConfigURL: configURL,
 		GitHubAppAuth:   *auth,
 		SystemInfo: scaleset.SystemInfo{
-			Version: "gha-baremetal-operator/v1alpha1",
+			System:    "smart-hibernatable-actions-runner-controller",
+			Version:   "v1alpha1",
+			Subsystem: "controller",
 		},
 	})
 	if err != nil {
@@ -100,7 +106,6 @@ func NewClient(configURL string, auth *scaleset.GitHubAppAuth) (ScaleSetClient, 
 
 	return &clientImpl{
 		rawClient: rawClient,
-		configURL: configURL,
 	}, nil
 }
 
@@ -115,7 +120,10 @@ func (c *clientImpl) GetOrCreateScaleSet(ctx context.Context, scaleSetName, runn
 	}
 
 	existing, err := c.rawClient.GetRunnerScaleSet(ctx, rg.ID, scaleSetName)
-	if err == nil && existing != nil {
+	if err != nil {
+		return 0, fmt.Errorf("failed to get runner scale set %q: %w", scaleSetName, err)
+	}
+	if existing != nil {
 		return int64(existing.ID), nil
 	}
 
@@ -123,6 +131,9 @@ func (c *clientImpl) GetOrCreateScaleSet(ctx context.Context, scaleSetName, runn
 	created, err := c.rawClient.CreateRunnerScaleSet(ctx, &scaleset.RunnerScaleSet{
 		Name:          scaleSetName,
 		RunnerGroupID: rg.ID,
+		RunnerSetting: scaleset.RunnerSetting{
+			DisableUpdate: true,
+		},
 	})
 	if err != nil {
 		return 0, fmt.Errorf("failed to create runner scale set %q: %w", scaleSetName, err)
@@ -146,13 +157,16 @@ func (c *clientImpl) GenerateJITConfig(ctx context.Context, scaleSetID int64, ru
 		return nil, fmt.Errorf("failed to generate JIT config for runner %q: %w", runnerName, err)
 	}
 
-	var runnerID int64
-	if res.Runner != nil {
-		runnerID = int64(res.Runner.ID)
+	if res.Runner == nil {
+		return nil, fmt.Errorf("GitHub returned JIT config without runner reference for %q", runnerName)
+	}
+
+	if res.EncodedJITConfig == "" {
+		return nil, fmt.Errorf("GitHub returned empty JIT config for runner %q", runnerName)
 	}
 
 	return &JITConfigResponse{
-		RunnerID:         runnerID,
+		RunnerID:         int64(res.Runner.ID),
 		RunnerName:       runnerName,
 		EncodedJITConfig: res.EncodedJITConfig,
 	}, nil
@@ -178,15 +192,23 @@ func (c *clientImpl) RemoveRunner(ctx context.Context, runnerID int64) error {
 	return nil
 }
 
-func (c *clientImpl) CreateListenerSession(ctx context.Context, scaleSetID int64, maxCapacity int, _ listener.Scaler, recorder listener.MetricsRecorder) (*ListenerSession, error) {
+func (c *clientImpl) CreateListenerSession(ctx context.Context, scaleSetID int64, owner string, maxCapacity int, recorder listener.MetricsRecorder) (ListenerSession, error) {
+	if owner == "" {
+		if h, err := os.Hostname(); err == nil && h != "" {
+			owner = h
+		} else {
+			owner = fmt.Sprintf("listener-%d", time.Now().UnixNano())
+		}
+	}
+
+	sessionClient, err := c.rawClient.MessageSessionClient(ctx, int(scaleSetID), owner)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create message session client: %w", err)
+	}
+
 	opts := []listener.Option{}
 	if recorder != nil {
 		opts = append(opts, listener.WithMetricsRecorder(recorder))
-	}
-
-	sessionClient, err := c.rawClient.MessageSessionClient(ctx, int(scaleSetID), "gha-listener")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create message session client: %w", err)
 	}
 
 	l, err := listener.New(sessionClient, listener.Config{
@@ -194,19 +216,14 @@ func (c *clientImpl) CreateListenerSession(ctx context.Context, scaleSetID int64
 		MaxRunners: maxCapacity,
 	}, opts...)
 	if err != nil {
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_ = sessionClient.Close(closeCtx)
 		return nil, fmt.Errorf("failed to create listener: %w", err)
 	}
 
-	return &ListenerSession{
-		Listener:      l,
-		SessionClient: sessionClient,
+	return &listenerSessionImpl{
+		listener:      l,
+		sessionClient: sessionClient,
 	}, nil
-}
-
-func (c *clientImpl) CreateListener(ctx context.Context, scaleSetID int64, maxCapacity int, scaler listener.Scaler, recorder listener.MetricsRecorder) (*listener.Listener, error) {
-	sess, err := c.CreateListenerSession(ctx, scaleSetID, maxCapacity, scaler, recorder)
-	if err != nil {
-		return nil, err
-	}
-	return sess.Listener, nil
 }

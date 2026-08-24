@@ -80,7 +80,7 @@ func RunListenerWithLease(ctx context.Context, opts RunnerOptions) error {
 		OnStartedLeading: func(leaderCtx context.Context) {
 			runnerLogger.Info("acquired lease, starting scale set listener", "scaleSet", fmt.Sprintf("%s/%s", opts.Namespace, opts.Name))
 			tracker.SetLeaseAcquired(true)
-			runListenerSession(leaderCtx, opts, tracker)
+			runListenerSession(leaderCtx, opts, tracker, id)
 		},
 		OnStoppedLeading: func() {
 			runnerLogger.Info("lost lease, stopping listener")
@@ -113,7 +113,7 @@ func waitWithContext(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-func runListenerSession(ctx context.Context, opts RunnerOptions, tracker *ReadinessTracker) {
+func runListenerSession(ctx context.Context, opts RunnerOptions, tracker *ReadinessTracker, owner string) {
 	attempt := 0
 	for {
 		select {
@@ -190,7 +190,7 @@ func runListenerSession(ctx context.Context, opts RunnerOptions, tracker *Readin
 			maxCapacity = 0
 		}
 
-		sess, err := ghaClient.CreateListenerSession(ctx, scaleSet.Status.ScaleSetID, maxCapacity, scaler, recorder)
+		sess, err := ghaClient.CreateListenerSession(ctx, scaleSet.Status.ScaleSetID, owner, maxCapacity, recorder)
 		if err != nil {
 			backoff := calculateBackoff(attempt, 2*time.Second, 60*time.Second)
 			attempt++
@@ -222,7 +222,7 @@ func runListenerSession(ctx context.Context, opts RunnerOptions, tracker *Readin
 						}
 						if newMax != lastMax {
 							runnerLogger.Info("updating advertised maxCapacity on listener", "oldMax", lastMax, "newMax", newMax)
-							sess.Listener.SetMaxRunners(newMax)
+							sess.SetMaxRunners(newMax)
 							lastMax = newMax
 						}
 					}
@@ -232,7 +232,7 @@ func runListenerSession(ctx context.Context, opts RunnerOptions, tracker *Readin
 
 		sessionStartTime := time.Now()
 		runnerLogger.Info("starting GitHub actions scale set listener session...", "maxCapacity", maxCapacity)
-		runErr := sess.Listener.Run(sessionCtx, scaler)
+		runErr := sess.Run(sessionCtx, scaler)
 
 		// セッション終了: cancel を呼び、MessageSessionClient.Close を明示的に呼んで GitHub 側セッションを即時解放
 		cancel()

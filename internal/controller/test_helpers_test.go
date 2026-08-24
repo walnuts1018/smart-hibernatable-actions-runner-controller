@@ -212,18 +212,35 @@ func (c *fakeScaleSetClient) RemoveRunner(ctx context.Context, runnerID int64) e
 	return nil
 }
 
-func (c *fakeScaleSetClient) CreateListener(ctx context.Context, scaleSetID int64, maxCapacity int, scaler listener.Scaler, recorder listener.MetricsRecorder) (*listener.Listener, error) {
-	if c.createListenerErr != nil {
-		return nil, c.createListenerErr
-	}
-	return c.createdListener, nil
+type fakeListenerSession struct {
+	listener *listener.Listener
+	closed   bool
 }
 
-func (c *fakeScaleSetClient) CreateListenerSession(ctx context.Context, scaleSetID int64, maxCapacity int, scaler listener.Scaler, recorder listener.MetricsRecorder) (*githubscaleset.ListenerSession, error) {
+func (s *fakeListenerSession) Run(ctx context.Context, scaler listener.Scaler) error {
+	if s.listener != nil {
+		return s.listener.Run(ctx, scaler)
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (s *fakeListenerSession) SetMaxRunners(count int) {
+	if s.listener != nil {
+		s.listener.SetMaxRunners(count)
+	}
+}
+
+func (s *fakeListenerSession) Close(ctx context.Context) error {
+	s.closed = true
+	return nil
+}
+
+func (c *fakeScaleSetClient) CreateListenerSession(ctx context.Context, scaleSetID int64, owner string, maxCapacity int, recorder listener.MetricsRecorder) (githubscaleset.ListenerSession, error) {
 	if c.createListenerErr != nil {
 		return nil, c.createListenerErr
 	}
-	return &githubscaleset.ListenerSession{
-		Listener: c.createdListener,
+	return &fakeListenerSession{
+		listener: c.createdListener,
 	}, nil
 }

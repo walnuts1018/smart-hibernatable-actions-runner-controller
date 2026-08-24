@@ -9,7 +9,7 @@ import (
 // Well-known labels, annotations, and finalizers for runner resources.
 const (
 	LabelManagedBy                 = "app.kubernetes.io/managed-by"
-	LabelManagedByValue            = "gha-baremetal-operator"
+	LabelManagedByValue            = "smart-hibernatable-actions-runner-controller"
 	LabelScaleSetUID               = "gha.walnuts.dev/scale-set-uid"
 	LabelScaleSetName              = "gha.walnuts.dev/scale-set-name"
 	LabelRunnerUID                 = "gha.walnuts.dev/runner-uid"
