@@ -26,11 +26,21 @@ rules:
   - runnermachines/status
   - runnernodepools/status
   - runnerscalesets/status
-  - ephemeralrunners/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - sharc.walnuts.dev
+  resources:
+  - ephemeralrunners/status
+  - ephemeralrunnersets/status
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - sharc.walnuts.dev
   resources:
@@ -56,24 +66,23 @@ rules:
 - apiGroups:
   - sharc.walnuts.dev
   resources:
-  - ephemeralrunnersets/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - sharc.walnuts.dev
-  resources:
   - ephemeralrunnersets/finalizers
   verbs:
   - update
+- apiGroups:
+  - ""
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
 - apiGroups:
   - ""
   resources:
   - pods
   - secrets
   - configmaps
-  - events
   - nodes
   - serviceaccounts
   verbs:

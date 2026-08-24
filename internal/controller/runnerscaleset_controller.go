@@ -52,15 +52,18 @@ type RunnerScaleSetReconciler struct {
 // +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnerscalesets/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnerscalesets/finalizers,verbs=update
 // +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunnersets,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunnersets/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunners,verbs=get;list;watch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunnersets/status,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunners,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=ephemeralrunners/status,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnernodepools,verbs=get;list;watch
+// +kubebuilder:rbac:groups=sharc.walnuts.dev,resources=runnermachines,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 
 func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
