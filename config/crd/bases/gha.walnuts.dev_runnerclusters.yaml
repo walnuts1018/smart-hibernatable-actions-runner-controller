@@ -57,6 +57,16 @@ spec:
           spec:
             description: RunnerClusterSpec defines the desired state of RunnerCluster.
             properties:
+              connection:
+                description: Connection defines connection and transport options for
+                  communicating with the remote cluster.
+                properties:
+                  insecureSkipTLSVerify:
+                    description: |-
+                      InsecureSkipTLSVerify controls whether the remote cluster client skips TLS certificate verification.
+                      If set to true, TLS verification is disabled regardless of what is configured in the kubeconfig.
+                    type: boolean
+                type: object
               identity:
                 description: Identity defines identity and adoption expectations for
                   the cluster.

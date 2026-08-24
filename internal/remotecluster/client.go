@@ -37,10 +37,11 @@ type Provider interface {
 }
 
 type cachedClient struct {
-	client          client.Client
-	discoveryClient discovery.DiscoveryInterface
-	httpClient      *http.Client
-	resourceVersion string
+	client                client.Client
+	discoveryClient       discovery.DiscoveryInterface
+	httpClient            *http.Client
+	resourceVersion       string
+	insecureSkipTLSVerify bool
 }
 
 type providerImpl struct {
@@ -98,10 +99,13 @@ func (p *providerImpl) getCachedOrCreate(ctx context.Context, cluster *ghav1alph
 	}
 
 	clusterKey := fmt.Sprintf("%s/%s", cluster.Namespace, cluster.Name)
+	insecure := cluster.Spec.Connection != nil &&
+		cluster.Spec.Connection.InsecureSkipTLSVerify != nil &&
+		*cluster.Spec.Connection.InsecureSkipTLSVerify
 
 	p.cacheMu.RLock()
 	cached, ok := p.clients[clusterKey]
-	if ok && cached.resourceVersion == rv {
+	if ok && cached.resourceVersion == rv && cached.insecureSkipTLSVerify == insecure {
 		p.cacheMu.RUnlock()
 		return cached, nil
 	}
@@ -111,13 +115,20 @@ func (p *providerImpl) getCachedOrCreate(ctx context.Context, cluster *ghav1alph
 	defer p.cacheMu.Unlock()
 
 	// Double check
-	if cached, ok := p.clients[clusterKey]; ok && cached.resourceVersion == rv {
+	if cached, ok := p.clients[clusterKey]; ok && cached.resourceVersion == rv && cached.insecureSkipTLSVerify == insecure {
 		return cached, nil
 	}
 
 	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse kubeconfig for cluster %s: %w", clusterKey, err)
+	}
+
+	if insecure {
+		restConfig.Insecure = true
+		restConfig.TLSClientConfig.Insecure = true
+		restConfig.TLSClientConfig.CAData = nil
+		restConfig.TLSClientConfig.CAFile = ""
 	}
 
 	httpClient, err := rest.HTTPClientFor(restConfig)
@@ -139,10 +150,11 @@ func (p *providerImpl) getCachedOrCreate(ctx context.Context, cluster *ghav1alph
 	}
 
 	newEntry := &cachedClient{
-		client:          cl,
-		discoveryClient: disc,
-		httpClient:      httpClient,
-		resourceVersion: rv,
+		client:                cl,
+		discoveryClient:       disc,
+		httpClient:            httpClient,
+		resourceVersion:       rv,
+		insecureSkipTLSVerify: insecure,
 	}
 
 	old := p.clients[clusterKey]

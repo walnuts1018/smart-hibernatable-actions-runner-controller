@@ -62,6 +62,14 @@ type RunnerClusterIdentitySpec struct {
 	ExpectedClusterUID string `json:"expectedClusterUID,omitempty"`
 }
 
+// RunnerClusterConnectionSpec defines connection and transport settings for communicating with the remote cluster.
+type RunnerClusterConnectionSpec struct {
+	// InsecureSkipTLSVerify controls whether the remote cluster client skips TLS certificate verification.
+	// If set to true, TLS verification is disabled regardless of what is configured in the kubeconfig.
+	// +optional
+	InsecureSkipTLSVerify *bool `json:"insecureSkipTLSVerify,omitempty"`
+}
+
 // RunnerClusterSpec defines the desired state of RunnerCluster.
 type RunnerClusterSpec struct {
 	// KubeconfigSecretRef references the Secret containing the kubeconfig to connect to the runner Kubernetes cluster.
@@ -84,6 +92,10 @@ type RunnerClusterSpec struct {
 	// Identity defines identity and adoption expectations for the cluster.
 	// +optional
 	Identity *RunnerClusterIdentitySpec `json:"identity,omitempty"`
+
+	// Connection defines connection and transport options for communicating with the remote cluster.
+	// +optional
+	Connection *RunnerClusterConnectionSpec `json:"connection,omitempty"`
 }
 
 // RunnerClusterStatus defines the observed state of RunnerCluster.

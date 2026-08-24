@@ -249,3 +249,66 @@ func TestProvider_EmptyNamespaceValidation(t *testing.T) {
 		t.Fatalf("expected error for empty namespace, got nil")
 	}
 }
+
+func TestProvider_InsecureSkipTLSVerify(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = ghav1alpha1.AddToScheme(scheme)
+
+	// TLS server with self-signed certificate
+	tlsServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/readyz" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer tlsServer.Close()
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:       "test-ns",
+			Name:            "remote-kubeconfig",
+			ResourceVersion: "1",
+		},
+		Data: map[string][]byte{
+			// Server URL is https://... without CA certificate
+			"kubeconfig": makeKubeconfig(tlsServer.URL),
+		},
+	}
+
+	localClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
+	provider := NewProvider(localClient, scheme)
+
+	cluster := &ghav1alpha1.RunnerCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "test-ns",
+			Name:      "test-cluster",
+		},
+		Spec: ghav1alpha1.RunnerClusterSpec{
+			KubeconfigSecretRef: corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{
+					Name: "remote-kubeconfig",
+				},
+			},
+		},
+	}
+
+	// 1. Without InsecureSkipTLSVerify, CheckHealth should fail due to self-signed cert
+	err := provider.CheckHealth(context.Background(), cluster)
+	if err == nil {
+		t.Fatalf("expected CheckHealth to fail with self-signed cert when InsecureSkipTLSVerify is not enabled")
+	}
+
+	// 2. Enable InsecureSkipTLSVerify: true
+	insecureTrue := true
+	cluster.Spec.Connection = &ghav1alpha1.RunnerClusterConnectionSpec{
+		InsecureSkipTLSVerify: &insecureTrue,
+	}
+
+	err = provider.CheckHealth(context.Background(), cluster)
+	if err != nil {
+		t.Fatalf("expected CheckHealth to succeed when InsecureSkipTLSVerify is true, got: %v", err)
+	}
+}
