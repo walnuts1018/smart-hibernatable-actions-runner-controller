@@ -63,7 +63,18 @@ jobs:
             run: mise run fmt
 
       - name: Check for uncommitted changes
-        uses: ./.github/actions/check-generated
+        run: |
+          if ! git diff --exit-code; then
+            echo "::error::Generated files are out of date. Please run code generation / tidy locally and commit the changes."
+            exit 1
+          fi
+
+          untracked_files="$(git ls-files --others --exclude-standard)"
+          if [ -n "$untracked_files" ]; then
+            echo "::error::Untracked files were generated:"
+            printf '%s\n' "$untracked_files"
+            exit 1
+          fi
 
   status-check:
     name: status-check
