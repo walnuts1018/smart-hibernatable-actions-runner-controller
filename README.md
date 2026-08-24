@@ -44,7 +44,6 @@ helm upgrade --install sharc \
   oci://ghcr.io/walnuts1018/charts/smart-hibernatable-actions-runner-controller \
   --namespace smart-hibernatable-actions-runner-controller \
   --create-namespace \
-  --version 0.1.0
 ```
 
 1. Create Custom Resources (`RunnerCluster`, `RunnerNodePool`, `RunnerMachine`, `RunnerScaleSet`)
