@@ -136,8 +136,10 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// Thundering herd 防止のため、決定論的 Jitter を付加
-	jitteredRequeue := requeueAfter + stableJitter(machine.UID, 5*time.Second)
-	return ctrl.Result{RequeueAfter: jitteredRequeue}, nil
+	if requeueAfter > 0 {
+		requeueAfter += stableJitter(machine.UID, 5*time.Second)
+	}
+	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
 func stableJitter(uid types.UID, maxDelay time.Duration) time.Duration {

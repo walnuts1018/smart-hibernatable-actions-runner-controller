@@ -144,15 +144,7 @@ func (c *gofishController) getOrCreateClient(ctx context.Context) (*gofish.APICl
 func (c *gofishController) withSystem(ctx context.Context, fn func(sys *schemas.ComputerSystem) error) error {
 	gate := getEndpointGate(c.spec.Endpoint)
 
-	// 1. Global Semaphore
-	select {
-	case globalRedfishSemaphore <- struct{}{}:
-		defer func() { <-globalRedfishSemaphore }()
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-
-	// 2. Endpoint Concurrency (1 request per physical BMC host)
+	// 1. Endpoint Concurrency (1 request per physical BMC host)
 	select {
 	case gate.concurrency <- struct{}{}:
 		defer func() { <-gate.concurrency }()
@@ -160,9 +152,17 @@ func (c *gofishController) withSystem(ctx context.Context, fn func(sys *schemas.
 		return ctx.Err()
 	}
 
-	// 3. Endpoint Rate Limiter
+	// 2. Endpoint Rate Limiter
 	if err := gate.limiter.Wait(ctx); err != nil {
 		return err
+	}
+
+	// 3. Global Semaphore
+	select {
+	case globalRedfishSemaphore <- struct{}{}:
+		defer func() { <-globalRedfishSemaphore }()
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 
 	base, err := c.getOrCreateClient(ctx)
