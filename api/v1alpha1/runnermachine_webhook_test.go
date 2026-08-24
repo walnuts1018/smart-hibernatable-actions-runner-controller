@@ -31,7 +31,6 @@ func TestRunnerMachineDefaulting(t *testing.T) {
 		Spec: RunnerMachineSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "test-cluster"},
 			NodeName:   "node-1",
-			Capacity:   RunnerMachineCapacity{RunnerSlots: 4},
 			Redfish: RedfishSpec{
 				Endpoint:             "https://192.168.1.100",
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
@@ -83,13 +82,6 @@ func TestRunnerMachineValidateCreate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "capacity runnerSlots < 1",
-			mutate: func(m *RunnerMachine) {
-				m.Spec.Capacity.RunnerSlots = 0
-			},
-			wantErr: true,
-		},
-		{
 			name: "invalid redfish endpoint",
 			mutate: func(m *RunnerMachine) {
 				m.Spec.Redfish.Endpoint = "invalid-url"
@@ -113,7 +105,6 @@ func TestRunnerMachineValidateCreate(t *testing.T) {
 				Spec: RunnerMachineSpec{
 					ClusterRef: corev1.LocalObjectReference{Name: "test-cluster"},
 					NodeName:   "node-1",
-					Capacity:   RunnerMachineCapacity{RunnerSlots: 4},
 					Redfish: RedfishSpec{
 						Endpoint:             "https://192.168.1.100",
 						CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
@@ -137,7 +128,6 @@ func TestRunnerMachineValidateUpdate(t *testing.T) {
 		Spec: RunnerMachineSpec{
 			ClusterRef: corev1.LocalObjectReference{Name: "test-cluster"},
 			NodeName:   "node-1",
-			Capacity:   RunnerMachineCapacity{RunnerSlots: 4},
 			Redfish: RedfishSpec{
 				Endpoint:             "https://192.168.1.100",
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
@@ -147,7 +137,7 @@ func TestRunnerMachineValidateUpdate(t *testing.T) {
 
 	t.Run("valid update", func(t *testing.T) {
 		newMachine := oldMachine.DeepCopy()
-		newMachine.Spec.Capacity.RunnerSlots = 8
+		newMachine.Spec.Priority = 10
 		_, err := newMachine.ValidateUpdate(context.Background(), oldMachine, newMachine)
 		if err != nil {
 			t.Errorf("expected valid update, got error: %v", err)

@@ -287,10 +287,9 @@ func (r *RunnerScaleSetReconciler) reconcileCapacity(ctx context.Context, ss *gh
 	}
 
 	conditions.SetConditionWithGeneration(&ss.Status.Conditions, ss.Generation, conditions.TypeCapacityReady, metav1.ConditionTrue, conditions.ReasonCapacitySufficient, "NodePool found")
-	potentialCapacity := nodePool.Status.PotentialRunnerCapacity
 
-	effectiveMax := potentialCapacity
-	if ss.Spec.Scaling.MaxRunners != nil && *ss.Spec.Scaling.MaxRunners < effectiveMax {
+	effectiveMax := int32(0)
+	if ss.Spec.Scaling.MaxRunners != nil {
 		effectiveMax = *ss.Spec.Scaling.MaxRunners
 	}
 	if ss.Spec.Suspend {
@@ -298,16 +297,7 @@ func (r *RunnerScaleSetReconciler) reconcileCapacity(ctx context.Context, ss *gh
 	}
 	ss.Status.EffectiveMaxRunners = effectiveMax
 
-	if ss.Spec.Scaling.MaxRunners != nil && *ss.Spec.Scaling.MaxRunners > potentialCapacity {
-		if r.Recorder != nil {
-			r.Recorder.Eventf(ss, nil, corev1.EventTypeWarning, "CapacityExceeded", "Reconcile", "MaxRunners (%d) exceeds NodePool potential capacity (%d)", *ss.Spec.Scaling.MaxRunners, potentialCapacity)
-		}
-		conditions.SetConditionWithGeneration(&ss.Status.Conditions, ss.Generation, conditions.TypeCapacityLimited, metav1.ConditionTrue, conditions.ReasonCapacityExceeded, "MaxRunners exceeds NodePool potential capacity")
-	} else {
-		conditions.SetConditionWithGeneration(&ss.Status.Conditions, ss.Generation, conditions.TypeCapacityLimited, metav1.ConditionFalse, conditions.ReasonCapacitySufficient, "Capacity within limits")
-	}
-
-	return potentialCapacity, nil
+	return effectiveMax, nil
 }
 
 func (r *RunnerScaleSetReconciler) reconcileListener(ctx context.Context, ss *ghav1alpha1.RunnerScaleSet) error {

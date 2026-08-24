@@ -134,15 +134,6 @@ func (r *RunnerMachine) validateRunnerMachine() error {
 		))
 	}
 
-	// Capacity検証
-	if r.Spec.Capacity.RunnerSlots < 1 {
-		allErrs = append(allErrs, field.Invalid(
-			field.NewPath("spec", "capacity", "runnerSlots"),
-			r.Spec.Capacity.RunnerSlots,
-			"capacity runnerSlots must be greater than or equal to 1",
-		))
-	}
-
 	// Redfish Endpoint検証
 	if r.Spec.Redfish.Endpoint == "" {
 		allErrs = append(allErrs, field.Required(

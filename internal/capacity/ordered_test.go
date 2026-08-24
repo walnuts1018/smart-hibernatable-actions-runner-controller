@@ -6,163 +6,138 @@ import (
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 )
 
-func TestOrderedCapacityPlanner_Plan(t *testing.T) {
+func TestOrderedMachineSelector_Select(t *testing.T) {
 	tests := []struct {
 		name            string
 		enableMultiNode bool
-		machines        []MachineCapacity
-		requiredRunners int
+		machines        []MachineStatus
+		needsScaleUp    bool
 		wantSelected    []string
-		wantTotalCap    int
 		wantViolated    bool
+		wantStarting    bool
+		wantExhausted   bool
 	}{
 		{
-			name:            "scale to zero",
+			name:            "scale to zero - no scale up needed",
 			enableMultiNode: false,
-			machines: []MachineCapacity{
+			machines: []MachineStatus{
 				{
-					Machine:         &ghav1alpha1.RunnerMachine{Name: "m1"},
-					Capacity:        2,
+					Machine:         &ghav1alpha1.RunnerMachine{Name: "m1", Status: ghav1alpha1.RunnerMachineStatus{PowerState: ghav1alpha1.PowerStateOn}},
 					Priority:        100,
 					StartupRequired: true,
 					PoweredOn:       true,
+					Ready:           true,
 				},
 			},
-			requiredRunners: 0,
-			wantSelected:    []string{"m1"}, // startup required / always on stays
-			wantTotalCap:    2,
-			wantViolated:    false,
+			needsScaleUp: false,
+			wantSelected: []string{"m1"}, // startup required / always on stays
+			wantViolated: false,
 		},
 		{
 			name:            "single machine scale from zero without startup",
 			enableMultiNode: false,
-			machines: []MachineCapacity{
+			machines: []MachineStatus{
 				{
-					Machine:   &ghav1alpha1.RunnerMachine{Name: "m1"},
-					Capacity:  2,
+					Machine:   &ghav1alpha1.RunnerMachine{Name: "m1", Status: ghav1alpha1.RunnerMachineStatus{PowerState: ghav1alpha1.PowerStateOff}},
 					Priority:  100,
 					PoweredOn: false,
 				},
 			},
-			requiredRunners: 1,
-			wantSelected:    []string{"m1"},
-			wantTotalCap:    2,
-			wantViolated:    false,
+			needsScaleUp: true,
+			wantSelected: []string{"m1"},
+			wantStarting: true,
+			wantViolated: false,
 		},
 		{
 			name:            "multi-node disabled violation when multiple machines present",
 			enableMultiNode: false,
-			machines: []MachineCapacity{
+			machines: []MachineStatus{
 				{
 					Machine:  &ghav1alpha1.RunnerMachine{Name: "m1"},
-					Capacity: 2,
 					Priority: 200,
 				},
 				{
 					Machine:  &ghav1alpha1.RunnerMachine{Name: "m2"},
-					Capacity: 2,
 					Priority: 100,
 				},
 			},
-			requiredRunners: 2,
-			wantViolated:    true,
+			needsScaleUp: true,
+			wantViolated: true,
 		},
 		{
-			name:            "multi-node enabled ordered selection (higher priority first)",
+			name:            "multi-node enabled ordered selection - picks one candidate at a time (higher priority first)",
 			enableMultiNode: true,
-			machines: []MachineCapacity{
+			machines: []MachineStatus{
 				{
-					Machine:         &ghav1alpha1.RunnerMachine{Name: "worker2"},
-					Capacity:        4,
+					Machine:           &ghav1alpha1.RunnerMachine{Name: "startup-node", Status: ghav1alpha1.RunnerMachineStatus{PowerState: ghav1alpha1.PowerStateOn}},
+					Priority:          100,
+					StartupRequired:   true,
+					Ready:             true,
+					PreviouslyDesired: true,
+				},
+				{
+					Machine:         &ghav1alpha1.RunnerMachine{Name: "worker2", Status: ghav1alpha1.RunnerMachineStatus{PowerState: ghav1alpha1.PowerStateOff}},
 					Priority:        100, // lower priority
 					StartupRequired: false,
 				},
 				{
-					Machine:         &ghav1alpha1.RunnerMachine{Name: "startup-node"},
-					Capacity:        2,
-					Priority:        100,
-					StartupRequired: true,
-				},
-				{
-					Machine:         &ghav1alpha1.RunnerMachine{Name: "worker1"},
-					Capacity:        2,
+					Machine:         &ghav1alpha1.RunnerMachine{Name: "worker1", Status: ghav1alpha1.RunnerMachineStatus{PowerState: ghav1alpha1.PowerStateOff}},
 					Priority:        200, // higher priority
 					StartupRequired: false,
 				},
 			},
-			requiredRunners: 3,
-			wantSelected:    []string{"startup-node", "worker1"},
-			wantTotalCap:    4,
-			wantViolated:    false,
+			needsScaleUp: true,
+			wantSelected: []string{"startup-node", "worker1"},
+			wantStarting: true,
+			wantViolated: false,
 		},
 		{
-			name:            "quarantine failover to spare machine",
+			name:            "starting machine in progress prevents starting another candidate",
 			enableMultiNode: true,
-			machines: []MachineCapacity{
+			machines: []MachineStatus{
 				{
-					Machine:         &ghav1alpha1.RunnerMachine{Name: "startup"},
-					Capacity:        2,
-					Priority:        100,
-					StartupRequired: true,
-					Quarantined:     false,
+					Machine:           &ghav1alpha1.RunnerMachine{Name: "worker1", Status: ghav1alpha1.RunnerMachineStatus{PowerState: ghav1alpha1.PowerStatePoweringOn}},
+					Priority:          200,
+					PreviouslyDesired: true,
+					Ready:             false, // starting up
 				},
 				{
-					Machine:         &ghav1alpha1.RunnerMachine{Name: "worker1-broken"},
-					Capacity:        2,
-					Priority:        300, // highest priority but quarantined
-					StartupRequired: false,
-					Quarantined:     true,
-				},
-				{
-					Machine:         &ghav1alpha1.RunnerMachine{Name: "worker2-spare"},
-					Capacity:        2,
-					Priority:        200,
-					StartupRequired: false,
-					Quarantined:     false,
+					Machine:   &ghav1alpha1.RunnerMachine{Name: "worker2", Status: ghav1alpha1.RunnerMachineStatus{PowerState: ghav1alpha1.PowerStateOff}},
+					Priority:  100,
+					PoweredOn: false,
 				},
 			},
-			requiredRunners: 3,
-			wantSelected:    []string{"startup", "worker2-spare"},
-			wantTotalCap:    4,
-			wantViolated:    false,
+			needsScaleUp: true,
+			wantSelected: []string{"worker1"},
+			wantStarting: true, // waits for worker1
 		},
 		{
-			name:            "maintenance machine excluded from selection",
+			name:            "pool exhausted when all machines are active and scale-up is needed",
 			enableMultiNode: true,
-			machines: []MachineCapacity{
+			machines: []MachineStatus{
 				{
-					Machine:         &ghav1alpha1.RunnerMachine{Name: "startup"},
-					Capacity:        2,
-					Priority:        100,
-					StartupRequired: true,
-					Maintenance:     false,
+					Machine:           &ghav1alpha1.RunnerMachine{Name: "worker1", Status: ghav1alpha1.RunnerMachineStatus{PowerState: ghav1alpha1.PowerStateOn}},
+					Priority:          200,
+					PreviouslyDesired: true,
+					Ready:             true,
 				},
 				{
-					Machine:         &ghav1alpha1.RunnerMachine{Name: "worker1-maintenance"},
-					Capacity:        2,
-					Priority:        300,
-					StartupRequired: false,
-					Maintenance:     true, // under maintenance!
-				},
-				{
-					Machine:         &ghav1alpha1.RunnerMachine{Name: "worker2"},
-					Capacity:        2,
-					Priority:        200,
-					StartupRequired: false,
-					Maintenance:     false,
+					Machine:           &ghav1alpha1.RunnerMachine{Name: "worker2", Status: ghav1alpha1.RunnerMachineStatus{PowerState: ghav1alpha1.PowerStateOn}},
+					Priority:          100,
+					PreviouslyDesired: true,
+					Ready:             true,
 				},
 			},
-			requiredRunners: 3,
-			wantSelected:    []string{"startup", "worker2"},
-			wantTotalCap:    4,
-			wantViolated:    false,
+			needsScaleUp:  true,
+			wantSelected:  []string{"worker1", "worker2"},
+			wantExhausted: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			planner := NewOrderedCapacityPlanner(tt.enableMultiNode)
-			plan := planner.Plan(tt.machines, tt.requiredRunners)
+			selector := NewOrderedMachineSelector(tt.enableMultiNode)
+			plan := selector.Select(tt.machines, tt.needsScaleUp)
 
 			if plan.MultiNodeViolated != tt.wantViolated {
 				t.Fatalf("expected MultiNodeViolated=%v, got %v", tt.wantViolated, plan.MultiNodeViolated)
@@ -172,8 +147,12 @@ func TestOrderedCapacityPlanner_Plan(t *testing.T) {
 				return
 			}
 
-			if plan.TotalCapacity != tt.wantTotalCap {
-				t.Errorf("expected TotalCapacity=%d, got %d", tt.wantTotalCap, plan.TotalCapacity)
+			if plan.NodesStarting != tt.wantStarting {
+				t.Errorf("expected NodesStarting=%v, got %v", tt.wantStarting, plan.NodesStarting)
+			}
+
+			if plan.PoolExhausted != tt.wantExhausted {
+				t.Errorf("expected PoolExhausted=%v, got %v", tt.wantExhausted, plan.PoolExhausted)
 			}
 
 			if len(plan.SelectedMachines) != len(tt.wantSelected) {

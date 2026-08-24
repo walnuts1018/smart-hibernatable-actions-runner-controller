@@ -36,8 +36,9 @@ const (
 	TypeCapacityLimited = "CapacityLimited"
 
 	// EphemeralRunner
-	TypePodReady   = "PodReady"
-	TypePodCreated = "PodCreated"
+	TypePodScheduled = "PodScheduled"
+	TypePodReady     = "PodReady"
+	TypePodCreated   = "PodCreated"
 )
 
 // Standard Condition Reasons
@@ -87,6 +88,11 @@ const (
 	ReasonQuarantined             = "Quarantined"
 	ReasonClusterIdentityMismatch = "ClusterIdentityMismatch"
 	ReasonMachineIDMismatch       = "MachineIDMismatch"
+	ReasonUnschedulable           = "Unschedulable"
+	ReasonScheduled               = "Scheduled"
+	ReasonPoolExhausted           = "PoolExhausted"
+	ReasonNodesStarting           = "NodesStarting"
+	ReasonSchedulingBlocked       = "SchedulingBlocked"
 	ReasonStartupUnavailable      = "StartupUnavailable"
 	ReasonBootstrapUnavailable    = "StartupUnavailable" // for backward compatibility
 )

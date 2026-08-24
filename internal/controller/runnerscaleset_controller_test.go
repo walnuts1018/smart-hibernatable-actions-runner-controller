@@ -34,10 +34,6 @@ func TestRunnerScaleSetReconciler(t *testing.T) {
 	nodePool := &ghav1alpha1.RunnerNodePool{
 		Name:      "pool1",
 		Namespace: "default",
-		Status: ghav1alpha1.RunnerNodePoolStatus{
-			PotentialRunnerCapacity: 4,
-			ReadyRunnerCapacity:     4,
-		},
 	}
 
 	two := int32(2)
@@ -198,10 +194,6 @@ func TestRunnerScaleSetReconciler_ListenerCustomization(t *testing.T) {
 	nodePool := &ghav1alpha1.RunnerNodePool{
 		Name:      "pool1",
 		Namespace: "default",
-		Status: ghav1alpha1.RunnerNodePoolStatus{
-			PotentialRunnerCapacity: 4,
-			ReadyRunnerCapacity:     4,
-		},
 	}
 
 	scaleSet := &ghav1alpha1.RunnerScaleSet{

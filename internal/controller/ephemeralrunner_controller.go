@@ -653,9 +653,16 @@ func (r *EphemeralRunnerReconciler) applyPodStatus(epRunner *ghav1alpha1.Ephemer
 	log := logf.Log.WithName("ephemeralrunner-controller")
 	obs := observeRunnerPod(pod)
 
+	// Propagate Kubernetes PodScheduled condition
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type == corev1.PodScheduled {
+			conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypePodScheduled, metav1.ConditionStatus(cond.Status), cond.Reason, cond.Message)
+		}
+	}
+
 	switch obs.State {
 	case podStartupScheduling:
-		conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypePodReady, metav1.ConditionFalse, obs.Reason, obs.Message)
+		conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypePodReady, metav1.ConditionFalse, conditions.ReasonPending, obs.Message)
 	case podStartupStarting:
 		conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypePodReady, metav1.ConditionFalse, obs.Reason, obs.Message)
 	case podStartupRetryableFailure:

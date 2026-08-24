@@ -33,13 +33,13 @@ spec:
       jsonPath: .status.readyNodes
       name: Ready Nodes
       type: integer
-    - description: Total runner capacity in pool
-      jsonPath: .status.potentialRunnerCapacity
-      name: Potential Capacity
+    - description: Active runners count
+      jsonPath: .status.activeRunners
+      name: Active Runners
       type: integer
-    - description: Currently available runner capacity
-      jsonPath: .status.readyRunnerCapacity
-      name: Ready Capacity
+    - description: Pending runners count
+      jsonPath: .status.pendingRunners
+      name: Pending Runners
       type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -130,6 +130,11 @@ spec:
           status:
             description: RunnerNodePoolStatus defines the observed state of RunnerNodePool.
             properties:
+              activeRunners:
+                description: ActiveRunners is the count of non-terminal runners currently
+                  tracked on this pool.
+                format: int32
+                type: integer
               conditions:
                 description: Conditions store the detailed status conditions of the
                   node pool.
@@ -210,6 +215,11 @@ spec:
                         entered draining for scale-down.
                       format: date-time
                       type: string
+                    idleSince:
+                      description: IdleSince records the timestamp when this machine
+                        became idle (0 active runners and no unschedulable demand).
+                      format: date-time
+                      type: string
                     name:
                       description: Name is the name of the RunnerMachine resource.
                       type: string
@@ -227,11 +237,6 @@ spec:
                   as needed to satisfy demand.
                 format: int32
                 type: integer
-              desiredRunnerCapacity:
-                description: DesiredRunnerCapacity is the aggregated runner capacity
-                  needed across all referencing RunnerScaleSets.
-                format: int32
-                type: integer
               idleSince:
                 description: IdleSince records the timestamp when runner demand first
                   dropped to zero across all scale sets.
@@ -242,9 +247,9 @@ spec:
                   for this resource.
                 format: int64
                 type: integer
-              potentialRunnerCapacity:
-                description: PotentialRunnerCapacity is the aggregated runner capacity
-                  across all machines in the pool if powered on.
+              pendingRunners:
+                description: PendingRunners is the count of unscheduled or pending
+                  runners waiting for compute capacity.
                 format: int32
                 type: integer
               poweredOnNodes:
@@ -255,11 +260,6 @@ spec:
               readyNodes:
                 description: ReadyNodes is the number of physical machines currently
                   powered on and reporting Kubernetes Node Ready.
-                format: int32
-                type: integer
-              readyRunnerCapacity:
-                description: ReadyRunnerCapacity is the current runner capacity available
-                  from Ready machines.
                 format: int32
                 type: integer
             type: object

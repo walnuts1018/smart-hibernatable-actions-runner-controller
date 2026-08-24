@@ -46,7 +46,6 @@ func TestRunnerMachineReconciler_ScaleFromZero_PowerOnAndUncordon(t *testing.T) 
 			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
 			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
 			NodeName:    "node1",
-			Capacity:    ghav1alpha1.RunnerMachineCapacity{RunnerSlots: 2},
 			Redfish: ghav1alpha1.RedfishSpec{
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
 			},
@@ -172,7 +171,6 @@ func TestRunnerMachineReconciler_ScaleDown_DrainingAndShutdown(t *testing.T) {
 			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
 			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
 			NodeName:    "node1",
-			Capacity:    ghav1alpha1.RunnerMachineCapacity{RunnerSlots: 2},
 			Redfish: ghav1alpha1.RedfishSpec{
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
 			},
@@ -313,7 +311,6 @@ func TestRunnerMachineReconciler_ExternalCordonProtection(t *testing.T) {
 			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
 			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
 			NodeName:    "node1",
-			Capacity:    ghav1alpha1.RunnerMachineCapacity{RunnerSlots: 2},
 			Redfish: ghav1alpha1.RedfishSpec{
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
 			},
@@ -449,7 +446,6 @@ func TestRunnerMachineReconciler_MachineIDMismatchAndExplicitAdoption(t *testing
 			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
 			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
 			NodeName:    "node1",
-			Capacity:    ghav1alpha1.RunnerMachineCapacity{RunnerSlots: 2},
 			Redfish: ghav1alpha1.RedfishSpec{
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
 			},
@@ -588,7 +584,6 @@ func TestRunnerMachineReconciler_RedfishCircuitBreaker(t *testing.T) {
 			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
 			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
 			NodeName:    "node1",
-			Capacity:    ghav1alpha1.RunnerMachineCapacity{RunnerSlots: 2},
 			Redfish: ghav1alpha1.RedfishSpec{
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
 			},

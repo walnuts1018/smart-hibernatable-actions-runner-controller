@@ -49,15 +49,15 @@ func (s *ScalerHandler) HandleDesiredRunnerCount(ctx context.Context, count int)
 
 		orig := ss.DeepCopy()
 
-		// Managerが計算したEffectiveMaxRunnersを唯一のsource of truthとして使用
-		effectiveMax := ss.Status.EffectiveMaxRunners
-		if ss.Spec.Suspend {
-			effectiveMax = 0
-		}
-
-		targetRunners := min(ss.Spec.Scaling.MinRunners+int32(count), effectiveMax)
+		var targetRunners int32
 		if ss.Spec.Suspend {
 			targetRunners = 0
+		} else if ss.Spec.Scaling.MaxRunners != nil {
+			targetRunners = min(ss.Spec.Scaling.MinRunners+int32(count), *ss.Spec.Scaling.MaxRunners)
+		} else if ss.Status.EffectiveMaxRunners > 0 {
+			targetRunners = min(ss.Spec.Scaling.MinRunners+int32(count), ss.Status.EffectiveMaxRunners)
+		} else {
+			targetRunners = ss.Spec.Scaling.MinRunners + int32(count)
 		}
 
 		calculatedTarget = targetRunners

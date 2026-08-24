@@ -4,10 +4,9 @@ import (
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 )
 
-// MachineCapacity represents capacity and current status of a physical machine.
-type MachineCapacity struct {
+// MachineStatus represents the status of a physical machine for autoscaling decisions.
+type MachineStatus struct {
 	Machine           *ghav1alpha1.RunnerMachine
-	Capacity          int
 	Priority          int32
 	StartupRequired   bool
 	AlwaysOn          bool
@@ -20,13 +19,10 @@ type MachineCapacity struct {
 	ActiveRunners     int
 }
 
-// Plan represents the output of capacity planning.
+// Plan represents the output of autoscaling decision.
 type Plan struct {
-	// SelectedMachines contains the physical machines that should be powered on.
+	// SelectedMachines contains the physical machines that should be DesiredState=Active.
 	SelectedMachines []*ghav1alpha1.RunnerMachine
-
-	// TotalCapacity is the sum of runner capacities from selected machines.
-	TotalCapacity int
 
 	// StartupRequired indicates whether a startup machine is included in the selection.
 	StartupRequired bool
@@ -36,9 +32,15 @@ type Plan struct {
 
 	// MultiNodeViolated indicates if multi-node pool was encountered when MultiNode feature is disabled.
 	MultiNodeViolated bool
+
+	// PoolExhausted indicates all eligible machines in the pool are active but more capacity is needed.
+	PoolExhausted bool
+
+	// NodesStarting indicates a machine is currently powering on / starting up so we should wait.
+	NodesStarting bool
 }
 
-// Planner calculates which machines should be powered on to satisfy demanded runner capacity.
-type Planner interface {
-	Plan(machines []MachineCapacity, requiredRunners int) Plan
+// MachineSelector decides which machines should be powered on (Active).
+type MachineSelector interface {
+	Select(machines []MachineStatus, needsScaleUp bool) Plan
 }

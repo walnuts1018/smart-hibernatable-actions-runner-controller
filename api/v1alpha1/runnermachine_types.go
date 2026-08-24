@@ -57,13 +57,6 @@ const (
 	RedfishTimeoutPolicyForceOff RedfishTimeoutPolicy = "ForceOff"
 )
 
-// RunnerMachineCapacity defines the capacity provided by the physical machine.
-type RunnerMachineCapacity struct {
-	// RunnerSlots is the maximum number of concurrent runner slots this machine provides for capacity planning.
-	// +kubebuilder:validation:Minimum=1
-	RunnerSlots int32 `json:"runnerSlots"`
-}
-
 // RedfishTLSSpec defines TLS configuration for connecting to the Redfish BMC endpoint.
 type RedfishTLSSpec struct {
 	// CASecretRef optionally references a Secret containing the CA certificate to trust.
@@ -288,10 +281,6 @@ type RunnerMachineSpec struct {
 	// +optional
 	PowerPolicy RunnerMachinePowerPolicy `json:"powerPolicy,omitempty"`
 
-	// Capacity specifies the runner capacity provided by this machine.
-	// +kubebuilder:validation:Required
-	Capacity RunnerMachineCapacity `json:"capacity"`
-
 	// Priority specifies selection priority when scaling up (higher value = higher priority).
 	// +kubebuilder:default=0
 	// +optional
@@ -357,7 +346,6 @@ type RunnerMachineStatus struct {
 // +kubebuilder:resource:shortName=rmachine;rm,categories=gha;all
 // +kubebuilder:printcolumn:name="Power State",type="string",JSONPath=".status.powerState",description="Observed power state"
 // +kubebuilder:printcolumn:name="Node Ready",type="boolean",JSONPath=".status.kubernetes.ready",description="Kubernetes Node readiness"
-// +kubebuilder:printcolumn:name="Runner Slots",type="integer",JSONPath=".spec.capacity.runnerSlots",description="Declared runner slots capacity"
 // +kubebuilder:printcolumn:name="Priority",type="integer",JSONPath=".spec.priority",description="Scale-up priority"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 

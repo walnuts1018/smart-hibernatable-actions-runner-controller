@@ -84,17 +84,13 @@ type RunnerNodePoolStatus struct {
 	// +optional
 	ReadyNodes int32 `json:"readyNodes"`
 
-	// PotentialRunnerCapacity is the aggregated runner capacity across all machines in the pool if powered on.
+	// ActiveRunners is the count of non-terminal runners currently tracked on this pool.
 	// +optional
-	PotentialRunnerCapacity int32 `json:"potentialRunnerCapacity"`
+	ActiveRunners int32 `json:"activeRunners"`
 
-	// ReadyRunnerCapacity is the current runner capacity available from Ready machines.
+	// PendingRunners is the count of unscheduled or pending runners waiting for compute capacity.
 	// +optional
-	ReadyRunnerCapacity int32 `json:"readyRunnerCapacity"`
-
-	// DesiredRunnerCapacity is the aggregated runner capacity needed across all referencing RunnerScaleSets.
-	// +optional
-	DesiredRunnerCapacity int32 `json:"desiredRunnerCapacity"`
+	PendingRunners int32 `json:"pendingRunners"`
 
 	// IdleSince records the timestamp when runner demand first dropped to zero across all scale sets.
 	// +optional
@@ -133,6 +129,10 @@ type MachinePlanStatus struct {
 	// DesiredState is the target state decided by the capacity planner (Active or Off).
 	DesiredState MachineDesiredState `json:"desiredState"`
 
+	// IdleSince records the timestamp when this machine became idle (0 active runners and no unschedulable demand).
+	// +optional
+	IdleSince *metav1.Time `json:"idleSince,omitempty"`
+
 	// DrainStartedAt records the timestamp when the machine entered draining for scale-down.
 	// +optional
 	DrainStartedAt *metav1.Time `json:"drainStartedAt,omitempty"`
@@ -144,8 +144,8 @@ type MachinePlanStatus struct {
 // +kubebuilder:printcolumn:name="Desired Nodes",type="integer",JSONPath=".status.desiredNodes",description="Desired number of physical nodes"
 // +kubebuilder:printcolumn:name="Powered On",type="integer",JSONPath=".status.poweredOnNodes",description="Powered on nodes count"
 // +kubebuilder:printcolumn:name="Ready Nodes",type="integer",JSONPath=".status.readyNodes",description="Ready nodes count"
-// +kubebuilder:printcolumn:name="Potential Capacity",type="integer",JSONPath=".status.potentialRunnerCapacity",description="Total runner capacity in pool"
-// +kubebuilder:printcolumn:name="Ready Capacity",type="integer",JSONPath=".status.readyRunnerCapacity",description="Currently available runner capacity"
+// +kubebuilder:printcolumn:name="Active Runners",type="integer",JSONPath=".status.activeRunners",description="Active runners count"
+// +kubebuilder:printcolumn:name="Pending Runners",type="integer",JSONPath=".status.pendingRunners",description="Pending runners count"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // RunnerNodePool is the Schema for the runnernodepools API.

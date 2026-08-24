@@ -6,18 +6,23 @@ import (
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 )
 
-type orderedCapacityPlanner struct {
+type orderedMachineSelector struct {
 	enableMultiNode bool
 }
 
-// NewOrderedCapacityPlanner creates a new Planner using the Ordered strategy.
-func NewOrderedCapacityPlanner(enableMultiNode bool) Planner {
-	return &orderedCapacityPlanner{
+// NewOrderedMachineSelector creates a new MachineSelector using the Ordered strategy.
+func NewOrderedMachineSelector(enableMultiNode bool) MachineSelector {
+	return &orderedMachineSelector{
 		enableMultiNode: enableMultiNode,
 	}
 }
 
-func (p *orderedCapacityPlanner) Plan(machines []MachineCapacity, requiredRunners int) Plan {
+// NewOrderedCapacityPlanner creates a new MachineSelector (backward compatibility alias).
+func NewOrderedCapacityPlanner(enableMultiNode bool) MachineSelector {
+	return NewOrderedMachineSelector(enableMultiNode)
+}
+
+func (p *orderedMachineSelector) Select(machines []MachineStatus, needsScaleUp bool) Plan {
 	if len(machines) == 0 {
 		return Plan{}
 	}
@@ -31,13 +36,13 @@ func (p *orderedCapacityPlanner) Plan(machines []MachineCapacity, requiredRunner
 
 	var (
 		selected           []*ghav1alpha1.RunnerMachine
-		totalCapacity      int
 		hasStartup         bool
 		startupUnavailable bool
-		candidates         []MachineCapacity
+		hasStarting        bool
+		candidates         []MachineStatus
 	)
 
-	// Phase 1: AlwaysOn または StartupRequired マシンを優先選択
+	// Phase 1: AlwaysOn, StartupRequired, or Already Active machines
 	for _, mc := range machines {
 		if mc.Quarantined || mc.Maintenance {
 			if mc.StartupRequired {
@@ -46,13 +51,23 @@ func (p *orderedCapacityPlanner) Plan(machines []MachineCapacity, requiredRunner
 			continue
 		}
 
+		if mc.StartupRequired {
+			hasStartup = true
+		}
+
 		if mc.AlwaysOn || mc.StartupRequired {
 			selected = append(selected, mc.Machine)
-			totalCapacity += mc.Capacity
-			if mc.StartupRequired {
-				hasStartup = true
+			if mc.Machine.Status.PowerState != ghav1alpha1.PowerStateOn || !mc.Ready {
+				hasStarting = true
+			}
+		} else if mc.PreviouslyDesired {
+			// Already desired active
+			selected = append(selected, mc.Machine)
+			if mc.Machine.Status.PowerState != ghav1alpha1.PowerStateOn || !mc.Ready {
+				hasStarting = true
 			}
 		} else {
+			// Inactive candidate
 			candidates = append(candidates, mc)
 		}
 	}
@@ -63,63 +78,45 @@ func (p *orderedCapacityPlanner) Plan(machines []MachineCapacity, requiredRunner
 		}
 	}
 
-	if requiredRunners <= 0 {
-		// Scale to zero: only AlwaysOn / StartupRequired machines remain
+	// If no scale-up needed, return the currently active/mandatory machines
+	if !needsScaleUp {
 		return Plan{
 			SelectedMachines: selected,
-			TotalCapacity:    totalCapacity,
 			StartupRequired:  hasStartup,
 		}
 	}
 
-	// 既に前提条件のみで必要容量を満たしている場合はそのまま返す
-	if totalCapacity >= requiredRunners {
+	// If a machine is already starting up, wait for it before starting more (1-machine-at-a-time feedback loop)
+	if hasStarting {
 		return Plan{
-			SelectedMachines:   selected,
-			TotalCapacity:      totalCapacity,
-			StartupRequired:    hasStartup,
-			StartupUnavailable: startupUnavailable,
+			SelectedMachines: selected,
+			StartupRequired:  hasStartup,
+			NodesStarting:    true,
 		}
 	}
 
-	// Phase 2: 残りのマシンを（PreviouslyDesired -> ActiveRunners降順 -> Ready -> PoweredOn -> Priority降順 -> Name昇順）でソート
-	sort.SliceStable(candidates, func(i, j int) bool {
-		// 0. 前回選択されていたマシンへの Stickiness 優先 (フラッピング・不要な cold start 防止)
-		if candidates[i].PreviouslyDesired != candidates[j].PreviouslyDesired {
-			return candidates[i].PreviouslyDesired
-		}
-		// 1. 実行中Runner数降順 (Bin-packing: 稼働中Runnerが多いマシンを優先残存、空きマシンから優先Drain)
-		if candidates[i].ActiveRunners != candidates[j].ActiveRunners {
-			return candidates[i].ActiveRunners > candidates[j].ActiveRunners
-		}
-		// 2. Ready状態優先
-		if candidates[i].Ready != candidates[j].Ready {
-			return candidates[i].Ready
-		}
-		// 3. PoweredOn優先
-		if candidates[i].PoweredOn != candidates[j].PoweredOn {
-			return candidates[i].PoweredOn
-		}
-		// 4. Priority降順 (大きい値ほど高優先)
-		if candidates[i].Priority != candidates[j].Priority {
-			return candidates[i].Priority > candidates[j].Priority
-		}
-		// 5. 名前昇順で安定化
-		return candidates[i].Machine.Name < candidates[j].Machine.Name
-	})
+	// If we need scale-up and no machines are currently starting, select ONE candidate (Priority desc, Name asc)
+	if len(candidates) > 0 {
+		sort.SliceStable(candidates, func(i, j int) bool {
+			if candidates[i].Priority != candidates[j].Priority {
+				return candidates[i].Priority > candidates[j].Priority
+			}
+			return candidates[i].Machine.Name < candidates[j].Machine.Name
+		})
 
-	for _, mc := range candidates {
-		selected = append(selected, mc.Machine)
-		totalCapacity += mc.Capacity
-
-		if totalCapacity >= requiredRunners {
-			break
+		// Select exactly one candidate to power on
+		selected = append(selected, candidates[0].Machine)
+		return Plan{
+			SelectedMachines: selected,
+			StartupRequired:  hasStartup,
+			NodesStarting:    true,
 		}
 	}
 
+	// All available machines in pool are already selected and active, but more capacity is needed
 	return Plan{
 		SelectedMachines: selected,
-		TotalCapacity:    totalCapacity,
 		StartupRequired:  hasStartup,
+		PoolExhausted:    true,
 	}
 }

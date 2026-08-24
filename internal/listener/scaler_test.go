@@ -25,15 +25,14 @@ func TestScalerHandler_HandleDesiredRunnerCount(t *testing.T) {
 	machine := &ghav1alpha1.RunnerMachine{}
 	machine.Name = "m1"
 	machine.Namespace = "default"
-	machine.Spec.Capacity.RunnerSlots = 4
 
-	ten := int32(10)
+	four := int32(4)
 	scaleSet := &ghav1alpha1.RunnerScaleSet{}
 	scaleSet.Name = "test-ss"
 	scaleSet.Namespace = "default"
 	scaleSet.Spec.NodePoolRef.Name = "pool-1"
 	scaleSet.Spec.Scaling.MinRunners = 0
-	scaleSet.Spec.Scaling.MaxRunners = &ten
+	scaleSet.Spec.Scaling.MaxRunners = &four
 	scaleSet.Status.EffectiveMaxRunners = 4
 
 	zero := int32(0)
@@ -79,7 +78,7 @@ func TestScalerHandler_HandleDesiredRunnerCount(t *testing.T) {
 		t.Fatalf("expected ERS replicas 2, got %v", updatedERS.Spec.Replicas)
 	}
 
-	// effectiveMax (4) を超える要求 (例えば6) が来た場合、4にcapされることを検証
+	// MaxRunners (4) を超える要求 (例えば6) が来た場合、4にcapされることを検証
 	_, err = scaler.HandleDesiredRunnerCount(context.Background(), 6)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
