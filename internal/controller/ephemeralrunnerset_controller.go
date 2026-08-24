@@ -58,7 +58,7 @@ func (r *EphemeralRunnerSetReconciler) Reconcile(ctx context.Context, req ctrl.R
 	var activeRunners []*ghav1alpha1.EphemeralRunner
 	for i := range runnerList.Items {
 		run := &runnerList.Items[i]
-		if run.Spec.ScaleSetRef.Name == ers.Spec.ScaleSetRef.Name && isRunnerNonTerminal(run.Status.Phase) {
+		if run.Spec.ScaleSetRef.Name == ers.Spec.ScaleSetRef.Name && run.DeletionTimestamp.IsZero() && isRunnerNonTerminal(run.Status.Phase) {
 			activeRunners = append(activeRunners, run)
 		}
 	}
@@ -112,22 +112,27 @@ func (r *EphemeralRunnerSetReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	// 3. スケールダウン (target < active)
 	// アイドルまたは未起動の Runner から優先してスケールダウン
+	hasUnresolvedExcess := false
 	if targetReplicas < int32(len(activeRunners)) {
 		excess := int32(len(activeRunners)) - targetReplicas
-		log.Info("scaling down EphemeralRunners", "excess", excess)
+		log.Info("scaling down EphemeralRunners", "excess", excess, "target", targetReplicas, "active", len(activeRunners))
 		for _, run := range activeRunners {
 			if excess <= 0 {
 				break
 			}
-			if run.Status.Phase == ghav1alpha1.EphemeralRunnerPhasePending ||
+			if run.DeletionTimestamp.IsZero() && (
+				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhasePending ||
 				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseWaitingForCluster ||
-				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseIdle {
+				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseIdle) {
 				if err := r.Delete(ctx, run); err != nil {
 					log.Error(err, "failed to delete EphemeralRunner for scale-down", "runner", run.Name)
 				} else {
 					excess--
 				}
 			}
+		}
+		if excess > 0 {
+			hasUnresolvedExcess = true
 		}
 	}
 
@@ -142,6 +147,10 @@ func (r *EphemeralRunnerSetReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if err := r.updateStatus(ctx, &ers, origERS); err != nil {
 		log.Error(err, "failed to patch EphemeralRunnerSet status")
 		return ctrl.Result{}, err
+	}
+
+	if hasUnresolvedExcess {
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
