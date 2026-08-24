@@ -1,10 +1,10 @@
 name: CI
 
 on:
+  pull_request:
   push:
     branches:
       - main
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -20,48 +20,10 @@ defaults:
     shell: bash
 
 jobs:
-  changes:
-    name: Detect changes
-    runs-on: ubuntu-slim
-    outputs:
-      go: ${{ steps.filter.outputs.go }}
-      lint_config: ${{ steps.filter.outputs.lint_config }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Detect changed paths
-        id: filter
-        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
-        with:
-          filters: |
-            go:
-              - '**/*.go'
-              - 'go.mod'
-              - 'go.sum'
-              - 'api/**'
-              - 'cmd/**'
-              - 'internal/**'
-              - 'test/**'
-              - 'config/**'
-              - 'charts/**'
-              - 'PROJECT'
-              - 'Dockerfile'
-              - 'mise.toml'
-              - '.github/**'
-            lint_config:
-              - '.golangci.yml'
-              - '.custom-gcl.yml'
-              - '.github/workflows/**'
-              - '**/*.sh'
-
-  generate:
-    name: Verify generated code
+  controller:
+    name: controller
     runs-on: ubuntu-26.04
-    needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true'
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -71,7 +33,8 @@ jobs:
       - name: Setup tools
         uses: ./.github/actions/setup-tools
         with:
-          tools: go go:sigs.k8s.io/controller-tools/cmd/controller-gen kustomize
+          tools: go go:sigs.k8s.io/controller-tools/cmd/controller-gen go:sigs.k8s.io/controller-runtime/tools/setup-envtest kustomize golangci-lint shellcheck kind kubectl jq
+          golangci-lint-cache: "true"
 
       - name: Generate manifests and code
         run: |
@@ -79,109 +42,37 @@ jobs:
           mise run generate
           go mod tidy
 
-      - name: Check for uncommitted changes
-        uses: ./.github/actions/check-generated
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-26.04
-    needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true' || needs.changes.outputs.lint_config == 'true'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup tools
-        uses: ./.github/actions/setup-tools
-        with:
-          tools: go golangci-lint shellcheck
-          golangci-lint-cache: "true"
-
       - name: Build custom golangci-lint
         run: |
           if [ ! -x bin/custom-gcl ]; then
             mise run build-golangci-lint
           fi
 
-      - name: Validate workflows and shell scripts
-        run: mise run lint:shell
+      - parallel:
+          - name: Validate workflows and shell scripts
+            run: mise run lint:shell
+          - name: Run golangci-lint
+            run: mise run lint
+          - name: Run unit tests
+            run: mise run test
+          - name: Run e2e tests
+            run: mise run test-e2e
+          - name: Build binaries
+            run: mise run build
+          - name: Build installer manifest
+            run: mise run build-installer
+          - name: Format code
+            run: mise run fmt
 
-      - name: Run golangci-lint
-        run: ./bin/custom-gcl run ./...
-
-  test:
-    name: Unit Tests
-    runs-on: ubuntu-26.04
-    needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup tools
-        uses: ./.github/actions/setup-tools
-        with:
-          tools: go go:sigs.k8s.io/controller-runtime/tools/setup-envtest go:sigs.k8s.io/controller-tools/cmd/controller-gen jq
-
-      - name: Run unit tests
-        run: mise run test
-
-  test-e2e:
-    name: E2E Tests
-    runs-on: ubuntu-26.04
-    needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup tools
-        uses: ./.github/actions/setup-tools
-        with:
-          tools: go kind kubectl go:sigs.k8s.io/controller-runtime/tools/setup-envtest go:sigs.k8s.io/controller-tools/cmd/controller-gen kustomize jq
-
-      - name: Run e2e tests
-        run: mise run test-e2e
-
-  build:
-    name: Build binaries & installer
-    runs-on: ubuntu-26.04
-    needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup tools
-        uses: ./.github/actions/setup-tools
-        with:
-          tools: go kustomize go:sigs.k8s.io/controller-tools/cmd/controller-gen
-
-      - name: Build binaries
-        run: mise run build
-
-      - name: Build installer manifest
-        run: mise run build-installer
+      - name: Check for uncommitted changes
+        uses: ./.github/actions/check-generated
 
   status-check:
     name: status-check
-    runs-on: ubuntu-slim
-    needs:
-      - changes
-      - generate
-      - lint
-      - test
-      - test-e2e
-      - build
     if: always()
+    needs:
+      - controller
+    runs-on: ubuntu-slim
     steps:
       - name: Verify required jobs
         env:

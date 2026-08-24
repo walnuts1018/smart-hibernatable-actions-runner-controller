@@ -32,7 +32,6 @@ run = "go vet ./..."
 
 [tasks.test]
 description = "Run tests"
-depends = ["manifests", "generate", "fmt", "vet"]
 run = 'KUBEBUILDER_ASSETS="$(setup-envtest use -p path)" go test $(go list ./... | grep -v /e2e) -coverprofile cover.out'
 
 [tasks."build-golangci-lint"]
@@ -78,7 +77,7 @@ run = 'kind delete cluster --name "${KIND_CLUSTER:-sharc-test-e2e}"'
 
 [tasks.test-e2e]
 description = "Run the e2e tests in Kind cluster"
-depends = ["setup-test-e2e", "manifests", "generate", "fmt", "vet"]
+depends = ["setup-test-e2e"]
 run = """
 KIND_CLUSTER="${KIND_CLUSTER:-sharc-test-e2e}"
 trap 'mise run cleanup-test-e2e' EXIT
@@ -87,7 +86,6 @@ KIND=kind KIND_CLUSTER="${KIND_CLUSTER}" go test -tags=e2e ./test/e2e/ -v -ginkg
 
 [tasks.build]
 description = "Build manager and listener binaries"
-depends = ["manifests", "generate", "fmt", "vet"]
 run = "go build -o bin/manager cmd/main.go && go build -o bin/listener cmd/listener/main.go"
 
 [tasks.run]
@@ -105,7 +103,6 @@ run = 'docker push "${IMG:-controller:latest}"'
 
 [tasks.build-installer]
 description = "Generate a consolidated YAML with CRDs and deployment"
-depends = ["manifests", "generate"]
 run = """
 IMG="${IMG:-controller:latest}"
 mkdir -p dist
