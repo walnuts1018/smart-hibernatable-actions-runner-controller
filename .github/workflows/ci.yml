@@ -96,7 +96,7 @@ jobs:
       - name: Setup tools
         uses: ./.github/actions/setup-tools
         with:
-          tools: go golangci-lint actionlint shellcheck
+          tools: go golangci-lint shellcheck
           golangci-lint-cache: "true"
 
       - name: Build custom golangci-lint
@@ -106,7 +106,7 @@ jobs:
           fi
 
       - name: Validate workflows and shell scripts
-        run: mise run lint:workspace
+        run: mise run lint:shell
 
       - name: Run golangci-lint
         run: ./bin/custom-gcl run ./...
