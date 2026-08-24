@@ -32,11 +32,11 @@ jobs:
       matrix:
         arch:
           - key: linux-amd64
-            os: ubuntu-latest
+            os: ubuntu-26.04
             platform: linux/amd64
-          # - key: linux-arm64
-          #   os: ubuntu-latest
-          #   platform: linux/arm64
+          - key: linux-arm64
+            os: ubuntu-26.04-arm64
+            platform: linux/arm64
     steps:
       - name: Check out code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -131,7 +131,7 @@ jobs:
 
   merge:
     name: Merge and Push Docker Images
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: docker
     steps:
       - name: Check out code

@@ -22,7 +22,7 @@ defaults:
 jobs:
   changes:
     name: Detect changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     outputs:
       go: ${{ steps.filter.outputs.go }}
       lint_config: ${{ steps.filter.outputs.lint_config }}
@@ -59,7 +59,7 @@ jobs:
 
   generate:
     name: Verify generated code
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: changes
     if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true'
     steps:
@@ -84,7 +84,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: changes
     if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true' || needs.changes.outputs.lint_config == 'true'
     steps:
@@ -113,7 +113,7 @@ jobs:
 
   test:
     name: Unit Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: changes
     if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true'
     steps:
@@ -132,7 +132,7 @@ jobs:
 
   test-e2e:
     name: E2E Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: changes
     if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true'
     steps:
@@ -151,7 +151,7 @@ jobs:
 
   build:
     name: Build binaries & installer
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: changes
     if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true'
     steps:
@@ -173,7 +173,7 @@ jobs:
 
   status-check:
     name: status-check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     needs:
       - changes
       - generate

@@ -76,7 +76,7 @@ run = "find .github/scripts -type f -name '*.sh' -print0 | xargs -0 shellcheck"
 [tasks.setup-test-e2e]
 description = "Set up a Kind cluster for e2e tests if it does not exist"
 run = """
-KIND_CLUSTER="${KIND_CLUSTER:-smart-hibernatable-actions-runner-controller-test-e2e}"
+KIND_CLUSTER="${KIND_CLUSTER:-sharc-test-e2e}"
 if ! kind get clusters 2>/dev/null | grep -q "^${KIND_CLUSTER}$"; then
   echo "Creating Kind cluster '${KIND_CLUSTER}'..."
   kind create cluster --name "${KIND_CLUSTER}"
@@ -87,13 +87,13 @@ fi
 
 [tasks.cleanup-test-e2e]
 description = "Tear down the Kind cluster used for e2e tests"
-run = 'kind delete cluster --name "${KIND_CLUSTER:-smart-hibernatable-actions-runner-controller-test-e2e}"'
+run = 'kind delete cluster --name "${KIND_CLUSTER:-sharc-test-e2e}"'
 
 [tasks.test-e2e]
 description = "Run the e2e tests in Kind cluster"
 depends = ["setup-test-e2e", "manifests", "generate", "fmt", "vet"]
 run = """
-KIND_CLUSTER="${KIND_CLUSTER:-smart-hibernatable-actions-runner-controller-test-e2e}"
+KIND_CLUSTER="${KIND_CLUSTER:-sharc-test-e2e}"
 trap 'mise run cleanup-test-e2e' EXIT
 KIND=kind KIND_CLUSTER="${KIND_CLUSTER}" go test -tags=e2e ./test/e2e/ -v -ginkgo.v
 """

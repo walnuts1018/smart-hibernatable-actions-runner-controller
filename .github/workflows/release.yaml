@@ -29,7 +29,7 @@ concurrency:
 jobs:
   validate:
     name: Validate release target
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     outputs:
       release_tag: ${{ steps.release-target.outputs.release_tag }}
     steps:
@@ -72,7 +72,7 @@ jobs:
   publish:
     name: Create GitHub Release
     needs: [validate, artifacts]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     permissions:
       contents: write
     steps:
