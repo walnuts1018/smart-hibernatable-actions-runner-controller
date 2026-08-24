@@ -42,42 +42,22 @@ spec:
             {{- toYaml .Values.resources | nindent 12 }}
           env:
             - name: OTEL_METRICS_EXPORTER
-              value: {{ .Values.telemetry.metrics.exporter | quote }}
-            {{- with .Values.telemetry.serviceName }}
+              value: {{ .Values.otel.metricsExporter | quote }}
+            {{- with .Values.otel.serviceName }}
             - name: OTEL_SERVICE_NAME
               value: {{ . | quote }}
             {{- end }}
-            {{- with .Values.telemetry.resourceAttributes }}
+            {{- with .Values.otel.resourceAttributes }}
             - name: OTEL_RESOURCE_ATTRIBUTES
               value: {{ . | quote }}
             {{- end }}
-            {{- with .Values.telemetry.metrics.exportInterval }}
-            - name: OTEL_METRIC_EXPORT_INTERVAL
-              value: {{ . | quote }}
-            {{- end }}
-            {{- with .Values.telemetry.metrics.exportTimeout }}
-            - name: OTEL_METRIC_EXPORT_TIMEOUT
-              value: {{ . | quote }}
-            {{- end }}
-            {{- if eq .Values.telemetry.metrics.exporter "otlp" }}
-            {{- with .Values.telemetry.otlp.endpoint }}
+            {{- if eq .Values.otel.metricsExporter "otlp" }}
+            {{- with .Values.otel.exporter.endpoint }}
             - name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
               value: {{ . | quote }}
             {{- end }}
-            {{- with .Values.telemetry.otlp.protocol }}
+            {{- with .Values.otel.exporter.protocol }}
             - name: OTEL_EXPORTER_OTLP_METRICS_PROTOCOL
-              value: {{ . | quote }}
-            {{- end }}
-            {{- with .Values.telemetry.otlp.headers }}
-            - name: OTEL_EXPORTER_OTLP_METRICS_HEADERS
-              value: {{ . | quote }}
-            {{- end }}
-            {{- with .Values.telemetry.otlp.compression }}
-            - name: OTEL_EXPORTER_OTLP_METRICS_COMPRESSION
-              value: {{ . | quote }}
-            {{- end }}
-            {{- with .Values.telemetry.otlp.timeout }}
-            - name: OTEL_EXPORTER_OTLP_METRICS_TIMEOUT
               value: {{ . | quote }}
             {{- end }}
             {{- end }}

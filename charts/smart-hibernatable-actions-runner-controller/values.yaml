@@ -51,17 +51,11 @@ webhook:
     enabled: true
     certSecretName: ""
 
-telemetry:
+otel:
+  # Supported values are none, prometheus, and otlp.
+  metricsExporter: none
   serviceName: ""
   resourceAttributes: ""
-  metrics:
-    # Supported values are none, prometheus, and otlp.
-    exporter: none
-    exportInterval: ""
-    exportTimeout: ""
-  otlp:
+  exporter:
     endpoint: ""
     protocol: grpc
-    headers: ""
-    compression: ""
-    timeout: ""

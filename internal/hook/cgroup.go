@@ -35,7 +35,7 @@ func FindPodCgroup(cgroupRoot, podUID, fallbackDir string) string {
 
 	_ = filepath.WalkDir(cgroupRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // Ignore permission errors on individual cgroup subdirs
 		}
 		if !d.IsDir() {
 			return nil
@@ -43,7 +43,7 @@ func FindPodCgroup(cgroupRoot, podUID, fallbackDir string) string {
 
 		rel, err := filepath.Rel(cgroupRoot, path)
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // Ignore relative path computation errors
 		}
 		depth := strings.Count(rel, string(os.PathSeparator))
 		if rel == "." {
@@ -92,7 +92,7 @@ func ReadCPUUsageUsec(cgroupPath string) (uint64, error) {
 	// 1. Try cgroup v2 cpu.stat
 	cpuStatPath := filepath.Join(cgroupPath, "cpu.stat")
 	if file, err := os.Open(cpuStatPath); err == nil {
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -103,6 +103,9 @@ func ReadCPUUsageUsec(cgroupPath string) (uint64, error) {
 					return val, nil
 				}
 			}
+		}
+		if scanErr := scanner.Err(); scanErr != nil {
+			return 0, fmt.Errorf("failed to scan %s: %w", cpuStatPath, scanErr)
 		}
 	}
 

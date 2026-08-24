@@ -2,6 +2,8 @@ package hook
 
 import "time"
 
+const DefaultUnknownValue = "unknown"
+
 // JobStartData holds state captured at job start time and saved to a state file.
 type JobStartData struct {
 	StartTime         time.Time `json:"startTime"`

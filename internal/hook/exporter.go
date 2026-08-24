@@ -138,7 +138,7 @@ func SendOtlpMetrics(ctx context.Context, endpoint string, payload OtlpPayload) 
 	}
 
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := range 3 {
 		if attempt > 0 {
 			time.Sleep(time.Duration(attempt*200) * time.Millisecond)
 		}
@@ -154,7 +154,7 @@ func SendOtlpMetrics(ctx context.Context, endpoint string, payload OtlpPayload) 
 			lastErr = doErr
 			continue
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return nil
@@ -174,8 +174,7 @@ func ParseExtraAttributes(envVal string) map[string]string {
 	if err := json.Unmarshal([]byte(envVal), &attrs); err != nil {
 		// Try key=value,key=value comma-separated format
 		attrs = make(map[string]string)
-		pairs := strings.Split(envVal, ",")
-		for _, pair := range pairs {
+		for pair := range strings.SplitSeq(envVal, ",") {
 			kv := strings.SplitN(pair, "=", 2)
 			if len(kv) == 2 {
 				attrs[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
@@ -190,19 +189,19 @@ func PopulateMetricValues(mv *MetricValues) {
 	if mv.JobName == "" {
 		mv.JobName = os.Getenv("GITHUB_JOB")
 		if mv.JobName == "" {
-			mv.JobName = "unknown"
+			mv.JobName = DefaultUnknownValue
 		}
 	}
 	if mv.WorkflowName == "" {
 		mv.WorkflowName = os.Getenv("GITHUB_WORKFLOW")
 		if mv.WorkflowName == "" {
-			mv.WorkflowName = "unknown"
+			mv.WorkflowName = DefaultUnknownValue
 		}
 	}
 	if mv.Repository == "" {
 		mv.Repository = os.Getenv("GITHUB_REPOSITORY")
 		if mv.Repository == "" {
-			mv.Repository = "unknown"
+			mv.Repository = DefaultUnknownValue
 		}
 	}
 	if mv.JobResult == "" {

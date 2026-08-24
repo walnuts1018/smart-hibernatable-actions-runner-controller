@@ -44,7 +44,6 @@ type RunnerOptions struct {
 	Namespace       string
 	Name            string
 	ProbeAddr       string
-	MetricsAddr     string
 	Config          *rest.Config
 	K8sClient       client.Client
 	Clientset       *kubernetes.Clientset

@@ -143,25 +143,22 @@ Metrics are disabled by default with `OTEL_METRICS_EXPORTER=none`. OpenTelemetry
 Push metrics to an OTLP/gRPC collector:
 
 ```yaml
-telemetry:
+otel:
+  metricsExporter: otlp
   serviceName: sharc
   resourceAttributes: deployment.environment.name=production
-  metrics:
-    exporter: otlp
-    exportInterval: "30000"
-  otlp:
+  exporter:
     endpoint: http://opentelemetry-collector.observability:4317
     protocol: grpc
 ```
 
-Set `telemetry.otlp.protocol` to `http/protobuf` to use OTLP/HTTP. Headers, compression, and timeout can also be configured under `telemetry.otlp`.
+Set `otel.exporter.protocol` to `http/protobuf` to use OTLP/HTTP. Export intervals, headers, TLS, compression, and other advanced options can be supplied through `env` using standard OpenTelemetry environment variables.
 
 The Prometheus exporter can be enabled without adding Prometheus-specific resources to the chart:
 
 ```yaml
-telemetry:
-  metrics:
-    exporter: prometheus
+otel:
+  metricsExporter: prometheus
 env:
   - name: OTEL_EXPORTER_PROMETHEUS_HOST
     value: 0.0.0.0

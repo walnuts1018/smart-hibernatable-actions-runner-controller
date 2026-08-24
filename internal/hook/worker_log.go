@@ -71,7 +71,7 @@ func ExtractJobDisplayName(workerLogPath, fallback string) string {
 		if fallback != "" {
 			return fallback
 		}
-		return "unknown"
+		return DefaultUnknownValue
 	}
 
 	file, err := os.Open(workerLogPath)
@@ -79,9 +79,9 @@ func ExtractJobDisplayName(workerLogPath, fallback string) string {
 		if fallback != "" {
 			return fallback
 		}
-		return "unknown"
+		return DefaultUnknownValue
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -107,5 +107,5 @@ func ExtractJobDisplayName(workerLogPath, fallback string) string {
 	if fallback != "" {
 		return fallback
 	}
-	return "unknown"
+	return DefaultUnknownValue
 }

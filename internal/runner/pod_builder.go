@@ -104,18 +104,14 @@ func injectMetrics(scaleSet *ghav1alpha1.RunnerScaleSet, podSpec *corev1.PodSpec
 	hostPathDirectory := corev1.HostPathDirectory
 	podSpec.Volumes = append(podSpec.Volumes,
 		corev1.Volume{
-			Name: RunnerHookVolumeName,
-			VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{},
-			},
+			Name:     RunnerHookVolumeName,
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
 		},
 		corev1.Volume{
 			Name: CgroupRootVolumeName,
-			VolumeSource: corev1.VolumeSource{
-				HostPath: &corev1.HostPathVolumeSource{
-					Path: CgroupRootHostPath,
-					Type: &hostPathDirectory,
-				},
+			HostPath: &corev1.HostPathVolumeSource{
+				Path: CgroupRootHostPath,
+				Type: &hostPathDirectory,
 			},
 		},
 	)
