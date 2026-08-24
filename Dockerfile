@@ -6,10 +6,8 @@ ENV GOTOOLCHAIN=local
 
 WORKDIR /src
 
-RUN --mount=type=bind,source=go.mod,target=go.mod \
-    --mount=type=bind,source=go.sum,target=go.sum \
-    --mount=type=cache,id=go-mod,target=/go/pkg/mod \
-    go mod download
+COPY go.mod go.sum ./
+RUN go mod download
 
 FROM go-deps AS builder
 
