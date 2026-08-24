@@ -155,7 +155,7 @@ jobs:
 
   publish-chart:
     name: Package and Publish Helm Chart
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-slim
     needs: merge
     steps:
       - name: Check out code

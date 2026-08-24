@@ -3,70 +3,79 @@
 # =============================================================================
 # Go dependencies
 # =============================================================================
-FROM docker.io/golang:1.27.0-trixie AS go-deps
+FROM --platform=$BUILDPLATFORM docker.io/golang:1.27.0-trixie AS go-deps
 
 ENV GOTOOLCHAIN=local
 
 WORKDIR /src
 
-RUN rm -f /etc/apt/apt.conf.d/docker-clean \
-    && printf '%s\n' \
-    'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
-    > /etc/apt/apt.conf.d/keep-cache \
-    && printf '%s\n' \
-    'Acquire::Languages "none";' \
-    > /etc/apt/apt.conf.d/99no-translations
-
 RUN --mount=type=bind,source=go.mod,target=go.mod \
     --mount=type=bind,source=go.sum,target=go.sum \
-    --mount=type=cache,id=gha-baremetal-go-mod,target=/go/pkg/mod,sharing=shared \
-    go mod download -x
+    --mount=type=cache,id=go-mod,target=/go/pkg/mod \
+    go mod download
 
 # =============================================================================
-# Static Go builder
+# Builder Base
 # =============================================================================
-FROM go-deps AS static-go-builder
+FROM go-deps AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
+
+ENV CGO_ENABLED=0 \
+    GOOS=${TARGETOS} \
+    GOARCH=${TARGETARCH}
+
+# =============================================================================
+# Build Manager
+# =============================================================================
+FROM builder AS build-manager
 
 RUN --mount=type=bind,source=.,target=/src \
-    --mount=type=cache,id=gha-baremetal-go-mod,target=/go/pkg/mod,sharing=shared \
-    --mount=type=cache,id=gha-baremetal-go-build,target=/root/.cache/go-build,sharing=shared \
-    <<'EOF'
-set -eu
-
-mkdir -p /out
-
-tags="netgo,osusergo"
-
-CGO_ENABLED=0 \
+    --mount=type=cache,id=go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=go-build-${TARGETARCH},target=/root/.cache/go-build \
     go build \
         -buildvcs=false \
         -trimpath \
         -mod=readonly \
-        -tags "${tags}" \
+        -tags "netgo,osusergo" \
         -ldflags="-s -w" \
         -o /out/manager \
         ./cmd/main.go
 
-CGO_ENABLED=0 \
+# =============================================================================
+# Build Listener
+# =============================================================================
+FROM builder AS build-listener
+
+RUN --mount=type=bind,source=.,target=/src \
+    --mount=type=cache,id=go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=go-build-${TARGETARCH},target=/root/.cache/go-build \
     go build \
         -buildvcs=false \
         -trimpath \
         -mod=readonly \
-        -tags "${tags}" \
+        -tags "netgo,osusergo" \
         -ldflags="-s -w" \
         -o /out/listener \
         ./cmd/listener/main.go
 
-CGO_ENABLED=0 \
+# =============================================================================
+# Build Runner Hook
+# =============================================================================
+FROM builder AS build-runner-hook
+
+RUN --mount=type=bind,source=.,target=/src \
+    --mount=type=cache,id=go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=go-build-${TARGETARCH},target=/root/.cache/go-build \
     go build \
         -buildvcs=false \
         -trimpath \
         -mod=readonly \
-        -tags "${tags}" \
+        -tags "netgo,osusergo" \
         -ldflags="-s -w" \
         -o /out/runner-hook \
         ./cmd/runner-hook/main.go
-EOF
 
 # =============================================================================
 # Static runtime
@@ -83,7 +92,7 @@ USER 65532:65532
 FROM static-runtime AS manager
 
 COPY --link \
-    --from=static-go-builder \
+    --from=build-manager \
     --chmod=0555 \
     /out/manager \
     /manager
@@ -96,7 +105,7 @@ ENTRYPOINT ["/manager"]
 FROM static-runtime AS listener
 
 COPY --link \
-    --from=static-go-builder \
+    --from=build-listener \
     --chmod=0555 \
     /out/listener \
     /listener
@@ -109,7 +118,7 @@ ENTRYPOINT ["/listener"]
 FROM static-runtime AS runner-hook
 
 COPY --link \
-    --from=static-go-builder \
+    --from=build-runner-hook \
     --chmod=0555 \
     /out/runner-hook \
     /runner-hook
