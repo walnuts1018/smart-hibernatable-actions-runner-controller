@@ -109,4 +109,17 @@ for target in "${targets[@]}"; do
   docker buildx imagetools create \
     --tag "$destination" \
     "${sources[@]}"
+
+  manifest_digest="$(docker buildx imagetools inspect "$destination" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+  if [[ -z "$manifest_digest" || "$manifest_digest" != sha256:* ]]; then
+    echo "::error::Failed to inspect digest for ${destination}" >&2
+    exit 1
+  fi
+
+  echo "Pushed ${destination} with digest ${manifest_digest}"
+
+  if [ -n "${GITHUB_OUTPUT:-}" ]; then
+    target_key="${target//-/_}"
+    echo "${target_key}_digest=${manifest_digest}" >> "$GITHUB_OUTPUT"
+  fi
 done

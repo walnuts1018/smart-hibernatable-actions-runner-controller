@@ -181,6 +181,30 @@ env:
         key: token
 ```
 
+## Verification & Supply Chain Security
+
+All published container images and Helm charts include cryptographically signed build provenance attestations generated via GitHub Artifact Attestations (Sigstore / in-toto SLSA v1).
+
+You can verify the authenticity and provenance of any published artifact using the GitHub CLI:
+
+```shell
+# Verify Controller Manager Image
+gh attestation verify oci://ghcr.io/walnuts1018/smart-hibernatable-actions-runner-controller/manager:<TAG> \
+  --owner walnuts1018
+
+# Verify Listener Image
+gh attestation verify oci://ghcr.io/walnuts1018/smart-hibernatable-actions-runner-controller/listener:<TAG> \
+  --owner walnuts1018
+
+# Verify Runner Hook Image
+gh attestation verify oci://ghcr.io/walnuts1018/smart-hibernatable-actions-runner-controller/runner-hook:<TAG> \
+  --owner walnuts1018
+
+# Verify Helm Chart OCI Artifact
+gh attestation verify oci://ghcr.io/walnuts1018/charts/smart-hibernatable-actions-runner-controller:<VERSION> \
+  --owner walnuts1018
+```
+
 ## Development
 
 ### Prerequisites

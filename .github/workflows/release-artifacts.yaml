@@ -15,6 +15,8 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write
+  attestations: write
 
 concurrency:
   group: release-artifacts-${{ inputs.release_tag }}
@@ -120,6 +122,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create manifest lists and push
+        id: publish-manifests
         shell: bash
         env:
           DIGEST_DIR: ${{ runner.temp }}/digests
@@ -128,6 +131,27 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: ./.github/scripts/publish-image-manifests.sh
+
+      - name: Attest manager image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository }}/manager
+          subject-digest: ${{ steps.publish-manifests.outputs.manager_digest }}
+          push-to-registry: true
+
+      - name: Attest listener image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository }}/listener
+          subject-digest: ${{ steps.publish-manifests.outputs.listener_digest }}
+          push-to-registry: true
+
+      - name: Attest runner-hook image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository }}/runner-hook
+          subject-digest: ${{ steps.publish-manifests.outputs.runner_hook_digest }}
+          push-to-registry: true
 
   publish-chart:
     name: Package and Publish Helm Chart
@@ -167,7 +191,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish chart
+        id: push-chart
         shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           shopt -s nullglob
           packages=(dist/*.tgz)
@@ -175,4 +202,26 @@ jobs:
             echo "::error::Expected exactly one packaged chart, found ${#packages[@]}"
             exit 1
           fi
+          CHART_VERSION="${RELEASE_TAG#v}"
           helm push "${packages[0]}" "oci://${REGISTRY}/${{ github.repository_owner }}/charts"
+
+          chart_ref="${REGISTRY}/${{ github.repository_owner }}/charts/smart-hibernatable-actions-runner-controller:${CHART_VERSION}"
+          chart_digest="$(docker buildx imagetools inspect "$chart_ref" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          if [[ -z "$chart_digest" || "$chart_digest" != sha256:* ]]; then
+            echo "::error::Failed to inspect digest for ${chart_ref}" >&2
+            exit 1
+          fi
+          echo "chart_digest=${chart_digest}" >> "$GITHUB_OUTPUT"
+          echo "chart_name=${REGISTRY}/${{ github.repository_owner }}/charts/smart-hibernatable-actions-runner-controller" >> "$GITHUB_OUTPUT"
+
+      - name: Attest Helm chart OCI artifact
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.push-chart.outputs.chart_name }}
+          subject-digest: ${{ steps.push-chart.outputs.chart_digest }}
+          push-to-registry: true
+
+      - name: Attest Helm chart package archive
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: "dist/*.tgz"
