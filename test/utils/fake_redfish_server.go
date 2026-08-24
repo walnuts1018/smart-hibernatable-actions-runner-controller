@@ -2,6 +2,7 @@ package utils
 
 import (
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -15,31 +16,44 @@ const (
 
 // FakeRedfishServer emulates a physical machine's BMC Redfish interface for E2E and unit testing.
 type FakeRedfishServer struct {
-	mu            sync.RWMutex
-	Server        *httptest.Server
-	PowerState    string // "On", "Off", "PoweringOn", "PoweringOff"
-	ResetCount    int
-	LastResetType string
-	FailNextReset bool
-	Delay         time.Duration
+	mu                  sync.RWMutex
+	Server              *httptest.Server
+	PowerState          string // "On", "Off", "PoweringOn", "PoweringOff"
+	ResetCount          int
+	LastResetType       string
+	FailNextReset       bool
+	FailWithUnsupported bool
+	Delay               time.Duration
+	AllowableResetTypes []string
+	SystemsCount        int
 }
 
-// NewFakeRedfishServer creates and starts a new FakeRedfishServer.
+// NewFakeRedfishServer creates and starts a new FakeRedfishServer with TLS.
 func NewFakeRedfishServer(initialPowerState string) *FakeRedfishServer {
 	if initialPowerState == "" {
 		initialPowerState = "Off"
 	}
 	f := &FakeRedfishServer{
 		PowerState: initialPowerState,
+		AllowableResetTypes: []string{
+			"On",
+			"ForceOn",
+			"GracefulShutdown",
+			"ForceOff",
+			"PushPowerButton",
+		},
+		SystemsCount: 1,
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/redfish/v1/", f.handleServiceRoot)
 	mux.HandleFunc("/redfish/v1/Systems", f.handleSystems)
 	mux.HandleFunc("/redfish/v1/Systems/1", f.handleSystem)
+	mux.HandleFunc("/redfish/v1/Systems/2", f.handleSystem2)
 	mux.HandleFunc("/redfish/v1/Systems/1/Actions/ComputerSystem.Reset", f.handleReset)
+	mux.HandleFunc("/redfish/v1/Systems/2/Actions/ComputerSystem.Reset", f.handleReset)
 
-	f.Server = httptest.NewServer(mux)
+	f.Server = httptest.NewTLSServer(mux)
 	return f
 }
 
@@ -50,12 +64,23 @@ func (f *FakeRedfishServer) Close() {
 	}
 }
 
-// URL returns the base URL of the fake BMC.
+// URL returns the HTTPS base URL of the fake BMC.
 func (f *FakeRedfishServer) URL() string {
 	if f.Server != nil {
 		return f.Server.URL
 	}
 	return ""
+}
+
+// CACertPEM returns the PEM-encoded CA certificate for the test server.
+func (f *FakeRedfishServer) CACertPEM() []byte {
+	if f.Server != nil && f.Server.Certificate() != nil {
+		return pem.EncodeToMemory(&pem.Block{
+			Type:  "CERTIFICATE",
+			Bytes: f.Server.Certificate().Raw,
+		})
+	}
+	return nil
 }
 
 func (f *FakeRedfishServer) handleServiceRoot(w http.ResponseWriter, r *http.Request) {
@@ -75,40 +100,90 @@ func (f *FakeRedfishServer) handleServiceRoot(w http.ResponseWriter, r *http.Req
 }
 
 func (f *FakeRedfishServer) handleSystems(w http.ResponseWriter, _ *http.Request) {
+	f.mu.RLock()
+	count := f.SystemsCount
+	f.mu.RUnlock()
+
+	members := []map[string]string{
+		{odataIDKey: "/redfish/v1/Systems/1"},
+	}
+	if count > 1 {
+		members = append(members, map[string]string{
+			odataIDKey: "/redfish/v1/Systems/2",
+		})
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		odataIDKey:            "/redfish/v1/Systems",
 		nameKey:               "Computer Systems Collection",
-		"Members@odata.count": 1,
-		"Members": []map[string]string{
-			{odataIDKey: "/redfish/v1/Systems/1"},
-		},
+		"Members@odata.count": len(members),
+		"Members":             members,
 	})
 }
 
 func (f *FakeRedfishServer) handleSystem(w http.ResponseWriter, _ *http.Request) {
 	f.mu.RLock()
 	state := f.PowerState
+	allowable := f.AllowableResetTypes
 	f.mu.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	resp := map[string]any{
 		odataIDKey:   "/redfish/v1/Systems/1",
 		"Id":         "1",
 		nameKey:      "System-1",
 		"PowerState": state,
-		"Actions": map[string]any{
+	}
+
+	if allowable != nil {
+		resp["Actions"] = map[string]any{
+			"#ComputerSystem.Reset": map[string]any{
+				"target":                            "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
+				"ResetType@Redfish.AllowableValues": allowable,
+			},
+		}
+	} else {
+		resp["Actions"] = map[string]any{
 			"#ComputerSystem.Reset": map[string]any{
 				"target": "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
-				"ResetType@Redfish.AllowableValues": []string{
-					"On",
-					"GracefulShutdown",
-					"ForceOff",
-					"PushPowerButton",
-				},
 			},
-		},
-	})
+		}
+	}
+
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (f *FakeRedfishServer) handleSystem2(w http.ResponseWriter, _ *http.Request) {
+	f.mu.RLock()
+	state := f.PowerState
+	allowable := f.AllowableResetTypes
+	f.mu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	resp := map[string]any{
+		odataIDKey:   "/redfish/v1/Systems/2",
+		"Id":         "2",
+		nameKey:      "System-2",
+		"PowerState": state,
+	}
+
+	if allowable != nil {
+		resp["Actions"] = map[string]any{
+			"#ComputerSystem.Reset": map[string]any{
+				"target":                            "/redfish/v1/Systems/2/Actions/ComputerSystem.Reset",
+				"ResetType@Redfish.AllowableValues": allowable,
+			},
+		}
+	} else {
+		resp["Actions"] = map[string]any{
+			"#ComputerSystem.Reset": map[string]any{
+				"target": "/redfish/v1/Systems/2/Actions/ComputerSystem.Reset",
+			},
+		}
+	}
+
+	json.NewEncoder(w).Encode(resp)
 }
 
 type resetPayload struct {
@@ -130,6 +205,25 @@ func (f *FakeRedfishServer) handleReset(w http.ResponseWriter, r *http.Request) 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	if f.FailWithUnsupported {
+		f.FailWithUnsupported = false
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
+				"code":    "Base.1.0.ActionParameterNotSupported",
+				"message": "ResetType value is unsupported",
+				"@Message.ExtendedInfo": []map[string]any{
+					{
+						"MessageId": "Base.1.0.ActionParameterNotSupported",
+						"Message":   "ActionParameterNotSupported",
+					},
+				},
+			},
+		})
+		return
+	}
+
 	if f.FailNextReset {
 		f.FailNextReset = false
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -140,7 +234,7 @@ func (f *FakeRedfishServer) handleReset(w http.ResponseWriter, r *http.Request) 
 	f.LastResetType = p.ResetType
 
 	switch p.ResetType {
-	case "On":
+	case "On", "ForceOn":
 		f.PowerState = "On"
 	case "GracefulShutdown", "ForceOff", "PushPowerButton":
 		f.PowerState = "Off"
@@ -151,3 +245,4 @@ func (f *FakeRedfishServer) handleReset(w http.ResponseWriter, r *http.Request) 
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
