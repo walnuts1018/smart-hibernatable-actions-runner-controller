@@ -204,7 +204,7 @@ func jitBackoff(failures int32) time.Duration {
 		Steps:    int(failures),
 	}
 	dur := b.Duration
-	for i := 0; i < int(failures); i++ {
+	for range int(failures) {
 		dur = b.Step()
 	}
 	return dur

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -15,7 +16,39 @@ import (
 	"github.com/stmcginnis/gofish/schemas"
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/metrics"
+	"golang.org/x/time/rate"
 )
+
+type endpointGate struct {
+	concurrency chan struct{}
+	limiter     *rate.Limiter
+}
+
+var (
+	globalRedfishSemaphore = make(chan struct{}, 8)
+	endpointGatesMu        sync.Mutex
+	endpointGates          = make(map[string]*endpointGate)
+)
+
+func getEndpointGate(rawEndpoint string) *endpointGate {
+	endpointKey := rawEndpoint
+	if parsed, err := url.Parse(rawEndpoint); err == nil && parsed.Host != "" {
+		endpointKey = fmt.Sprintf("%s://%s", parsed.Scheme, parsed.Host)
+	}
+
+	endpointGatesMu.Lock()
+	defer endpointGatesMu.Unlock()
+
+	gate, exists := endpointGates[endpointKey]
+	if !exists {
+		gate = &endpointGate{
+			concurrency: make(chan struct{}, 1),
+			limiter:     rate.NewLimiter(rate.Limit(2), 2), // 2 requests/sec, burst 2
+		}
+		endpointGates[endpointKey] = gate
+	}
+	return gate
+}
 
 type gofishControllerFactory struct{}
 
@@ -109,6 +142,29 @@ func (c *gofishController) getOrCreateClient(ctx context.Context) (*gofish.APICl
 }
 
 func (c *gofishController) withSystem(ctx context.Context, fn func(sys *schemas.ComputerSystem) error) error {
+	gate := getEndpointGate(c.spec.Endpoint)
+
+	// 1. Global Semaphore
+	select {
+	case globalRedfishSemaphore <- struct{}{}:
+		defer func() { <-globalRedfishSemaphore }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	// 2. Endpoint Concurrency (1 request per physical BMC host)
+	select {
+	case gate.concurrency <- struct{}{}:
+		defer func() { <-gate.concurrency }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	// 3. Endpoint Rate Limiter
+	if err := gate.limiter.Wait(ctx); err != nil {
+		return err
+	}
+
 	base, err := c.getOrCreateClient(ctx)
 	if err != nil {
 		return err

@@ -31,7 +31,7 @@ func calculateBackoff(attempt int, base time.Duration, maxDelay time.Duration) t
 		Steps:    attempt + 1,
 	}
 	dur := b.Duration
-	for i := 0; i < attempt; i++ {
+	for range attempt {
 		dur = b.Step()
 	}
 	return dur

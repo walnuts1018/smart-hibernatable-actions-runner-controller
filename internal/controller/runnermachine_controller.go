@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -134,7 +135,18 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{RequeueAfter: requeueAfter}, nil
+	// Thundering herd 防止のため、決定論的 Jitter を付加
+	jitteredRequeue := requeueAfter + stableJitter(machine.UID, 5*time.Second)
+	return ctrl.Result{RequeueAfter: jitteredRequeue}, nil
+}
+
+func stableJitter(uid types.UID, maxDelay time.Duration) time.Duration {
+	if maxDelay <= 0 {
+		return 0
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(uid))
+	return time.Duration(h.Sum64() % uint64(maxDelay))
 }
 
 func (r *RunnerMachineReconciler) observeRedfish(ctx context.Context, machine *ghav1alpha1.RunnerMachine, skipRedfish bool) redfish.PowerController {
@@ -831,7 +843,7 @@ func (r *RunnerMachineReconciler) recordRedfishFailure(machine *ghav1alpha1.Runn
 			Steps:    int(h.ConsecutiveFailures - 2),
 		}
 		backoff := b.Duration
-		for i := 0; i < int(h.ConsecutiveFailures-3); i++ {
+		for range int(h.ConsecutiveFailures - 3) {
 			backoff = b.Step()
 		}
 		nextProbe := metav1.NewTime(now.Add(backoff))
