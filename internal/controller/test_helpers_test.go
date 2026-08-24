@@ -176,3 +176,12 @@ func (c *fakeScaleSetClient) CreateListener(ctx context.Context, scaleSetID int6
 	}
 	return c.createdListener, nil
 }
+
+func (c *fakeScaleSetClient) CreateListenerSession(ctx context.Context, scaleSetID int64, maxCapacity int, scaler listener.Scaler, recorder listener.MetricsRecorder) (*githubscaleset.ListenerSession, error) {
+	if c.createListenerErr != nil {
+		return nil, c.createListenerErr
+	}
+	return &githubscaleset.ListenerSession{
+		Listener: c.createdListener,
+	}, nil
+}

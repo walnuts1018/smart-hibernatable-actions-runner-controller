@@ -76,6 +76,11 @@ func (r *RunnerCluster) ValidateCreate(_ context.Context, obj *RunnerCluster) (a
 func (r *RunnerCluster) ValidateUpdate(_ context.Context, oldObj, newObj *RunnerCluster) (admission.Warnings, error) {
 	runnerclusterlog.Info("validate update RunnerCluster", "name", newObj.Name)
 
+	// 削除中のオブジェクト更新（Finalizer 削除など）は検証をスキップして Finalizer デッドロックを防止
+	if newObj.DeletionTimestamp != nil {
+		return nil, nil
+	}
+
 	var allErrs field.ErrorList
 
 	// 不変フィールドの検証

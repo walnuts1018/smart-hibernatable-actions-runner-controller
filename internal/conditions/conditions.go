@@ -1,6 +1,7 @@
 package conditions
 
 import (
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -19,6 +20,7 @@ const (
 	TypeKubernetesNodeReady = "KubernetesNodeReady"
 	TypeQuarantined         = "Quarantined"
 	TypeMaintenance         = "Maintenance"
+	TypeMaintenanceReady    = "MaintenanceReady"
 	TypeIdentityValid       = "IdentityValid"
 
 	// RunnerNodePool
@@ -98,29 +100,10 @@ func SetConditionWithGeneration(conditions *[]metav1.Condition, generation int64
 	if conditions == nil {
 		return
 	}
-
-	now := metav1.Now()
-	for i, existing := range *conditions {
-		if existing.Type == conditionType {
-			if existing.Status != status || existing.Reason != reason || existing.Message != message || (generation != 0 && existing.ObservedGeneration != generation) {
-				(*conditions)[i] = metav1.Condition{
-					Type:               conditionType,
-					Status:             status,
-					ObservedGeneration: generation,
-					LastTransitionTime: now,
-					Reason:             reason,
-					Message:            message,
-				}
-			}
-			return
-		}
-	}
-
-	*conditions = append(*conditions, metav1.Condition{
+	meta.SetStatusCondition(conditions, metav1.Condition{
 		Type:               conditionType,
 		Status:             status,
 		ObservedGeneration: generation,
-		LastTransitionTime: now,
 		Reason:             reason,
 		Message:            message,
 	})
@@ -128,20 +111,18 @@ func SetConditionWithGeneration(conditions *[]metav1.Condition, generation int64
 
 // IsConditionTrue checks if the given condition is True.
 func IsConditionTrue(conditions []metav1.Condition, conditionType string) bool {
-	for _, cond := range conditions {
-		if cond.Type == conditionType {
-			return cond.Status == metav1.ConditionTrue
-		}
-	}
-	return false
+	return meta.IsStatusConditionTrue(conditions, conditionType)
 }
 
 // GetCondition returns the condition with the given type, or nil if not found.
 func GetCondition(conditions []metav1.Condition, conditionType string) *metav1.Condition {
-	for i := range conditions {
-		if conditions[i].Type == conditionType {
-			return &conditions[i]
-		}
+	return meta.FindStatusCondition(conditions, conditionType)
+}
+
+// RemoveCondition removes the condition with the given type from the condition slice.
+func RemoveCondition(conditions *[]metav1.Condition, conditionType string) {
+	if conditions == nil {
+		return
 	}
-	return nil
+	meta.RemoveStatusCondition(conditions, conditionType)
 }

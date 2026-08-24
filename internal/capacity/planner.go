@@ -6,15 +6,17 @@ import (
 
 // MachineCapacity represents capacity and current status of a physical machine.
 type MachineCapacity struct {
-	Machine         *ghav1alpha1.RunnerMachine
-	Capacity        int
-	Priority        int32
-	Bootstrap       bool
-	PoweredOn       bool
-	Ready           bool
-	PowerManageable bool
-	Quarantined     bool
-	Maintenance     bool
+	Machine           *ghav1alpha1.RunnerMachine
+	Capacity          int
+	Priority          int32
+	Bootstrap         bool
+	PoweredOn         bool
+	Ready             bool
+	PowerManageable   bool
+	Quarantined       bool
+	Maintenance       bool
+	PreviouslyDesired bool
+	ActiveRunners     int
 }
 
 // Plan represents the output of capacity planning.

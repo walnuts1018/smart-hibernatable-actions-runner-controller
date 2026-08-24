@@ -64,6 +64,10 @@ type GitHubRunnerStatus struct {
 	// +optional
 	JobID int64 `json:"jobID,omitempty"`
 
+	// StartedObservedAt records the timestamp when the JobStarted event was observed from GitHub Actions.
+	// +optional
+	StartedObservedAt *metav1.Time `json:"startedObservedAt,omitempty"`
+
 	// CompletedObserved indicates whether a JobCompleted event was received from GitHub Actions.
 	// +optional
 	CompletedObserved bool `json:"completedObserved,omitempty"`
@@ -117,6 +121,14 @@ type ProvisioningAttemptStatus struct {
 	// JITGeneratedAt is the timestamp when JIT config was generated.
 	// +optional
 	JITGeneratedAt *metav1.Time `json:"jitGeneratedAt,omitempty"`
+
+	// Failures is the count of consecutive failed JIT provisioning attempts.
+	// +optional
+	Failures int32 `json:"failures,omitempty"`
+
+	// NextRetryAt is the timestamp when the next JIT provisioning attempt is allowed.
+	// +optional
+	NextRetryAt *metav1.Time `json:"nextRetryAt,omitempty"`
 }
 
 // RunnerFailureStatus records details when a runner pod or execution failed.
@@ -156,6 +168,10 @@ type EphemeralRunnerStatus struct {
 	// FinishedAt is the timestamp when the runner reached a terminal state (Completed or Failed).
 	// +optional
 	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
+
+	// GCEligibleAt is the timestamp after which this EphemeralRunner CR can be garbage collected.
+	// +optional
+	GCEligibleAt *metav1.Time `json:"gcEligibleAt,omitempty"`
 
 	// Failure contains diagnostic information if the runner failed.
 	// +optional

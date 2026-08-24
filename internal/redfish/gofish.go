@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/stmcginnis/gofish"
@@ -28,10 +29,12 @@ func (f *gofishControllerFactory) NewController(spec ghav1alpha1.RedfishSpec, us
 }
 
 type gofishController struct {
-	spec     ghav1alpha1.RedfishSpec
-	username string
-	password string
-	caCert   []byte
+	spec       ghav1alpha1.RedfishSpec
+	username   string
+	password   string
+	caCert     []byte
+	clientMu   sync.Mutex
+	baseClient *gofish.APIClient
 }
 
 // NewGofishController creates a new PowerController backed by gofish.
@@ -45,15 +48,6 @@ func NewGofishController(spec ghav1alpha1.RedfishSpec, username, password string
 }
 
 func (c *gofishController) getClientConfig() gofish.ClientConfig {
-	cfg := gofish.ClientConfig{
-		Endpoint:         c.spec.Endpoint,
-		Username:         c.username,
-		Password:         c.password,
-		Insecure:         c.spec.TLS.InsecureSkipVerify,
-		BasicAuth:        true,
-		ReuseConnections: true,
-	}
-
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: c.spec.TLS.InsecureSkipVerify,
 	}
@@ -65,6 +59,7 @@ func (c *gofishController) getClientConfig() gofish.ClientConfig {
 	}
 
 	tr := &http.Transport{
+		Proxy:           http.ProxyFromEnvironment,
 		TLSClientConfig: tlsConfig,
 		DialContext: (&net.Dialer{
 			Timeout:   5 * time.Second,
@@ -72,33 +67,70 @@ func (c *gofishController) getClientConfig() gofish.ClientConfig {
 		}).DialContext,
 		TLSHandshakeTimeout:   5 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
-		IdleConnTimeout:       90 * time.Second,
-		MaxIdleConns:          10,
-		MaxIdleConnsPerHost:   5,
+		IdleConnTimeout:       60 * time.Second,
+		MaxIdleConns:          5,
+		MaxIdleConnsPerHost:   2,
 	}
-	cfg.HTTPClient = &http.Client{
+
+	httpClient := &http.Client{
 		Transport: tr,
 		Timeout:   15 * time.Second,
 	}
 
-	return cfg
+	return gofish.ClientConfig{
+		Endpoint:              c.spec.Endpoint,
+		Username:              c.username,
+		Password:              c.password,
+		Insecure:              c.spec.TLS.InsecureSkipVerify,
+		BasicAuth:             true,
+		ReuseConnections:      true,
+		MaxConcurrentRequests: 1,
+		NoModifyTransport:     true,
+		HTTPClient:            httpClient,
+	}
 }
 
-func (c *gofishController) withSystem(_ context.Context, fn func(sys *schemas.ComputerSystem) error) error {
-	cfg := c.getClientConfig()
-	client, err := gofish.Connect(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to connect to Redfish endpoint: %w", err)
+func (c *gofishController) getOrCreateClient(ctx context.Context) (*gofish.APIClient, error) {
+	c.clientMu.Lock()
+	defer c.clientMu.Unlock()
+
+	if c.baseClient != nil {
+		return c.baseClient, nil
 	}
-	defer client.Logout()
+
+	cfg := c.getClientConfig()
+	client, err := gofish.ConnectContext(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Redfish endpoint: %w", err)
+	}
+
+	c.baseClient = client
+	return c.baseClient, nil
+}
+
+func (c *gofishController) withSystem(ctx context.Context, fn func(sys *schemas.ComputerSystem) error) error {
+	base, err := c.getOrCreateClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Request Context をバインド
+	client := base.WithContext(ctx)
 
 	service := client.GetService()
 	if service == nil {
+		// サービスルートが取得できない場合は次回再接続を促すためキャッシュをリセット
+		c.clientMu.Lock()
+		c.baseClient = nil
+		c.clientMu.Unlock()
 		return fmt.Errorf("failed to get Redfish service root")
 	}
 
 	systems, err := service.Systems()
 	if err != nil {
+		c.clientMu.Lock()
+		c.baseClient = nil
+		c.clientMu.Unlock()
 		return fmt.Errorf("failed to list systems from Redfish: %w", err)
 	}
 
@@ -124,7 +156,13 @@ func (c *gofishController) withSystem(_ context.Context, fn func(sys *schemas.Co
 		targetSystem = systems[0]
 	}
 
-	return fn(targetSystem)
+	if err := fn(targetSystem); err != nil {
+		c.clientMu.Lock()
+		c.baseClient = nil
+		c.clientMu.Unlock()
+		return err
+	}
+	return nil
 }
 
 func recordRedfishMetric(operation string, startTime time.Time, err error) {

@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/events"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -155,13 +156,29 @@ func (r *RunnerClusterReconciler) checkClusterHealth(ctx context.Context, cluste
 		} else if cluster.Status.ClusterUID == "" {
 			cluster.Status.ClusterUID = clusterUID
 		} else if cluster.Status.ClusterUID != clusterUID {
-			log.Error(fmt.Errorf("cluster identity mismatch"), "remote cluster UID changed (expected %s, got %s)", cluster.Status.ClusterUID, clusterUID)
-			if r.Recorder != nil {
-				r.Recorder.Eventf(cluster, nil, corev1.EventTypeWarning, "ClusterIdentityMismatch", "Reconcile", "Remote cluster UID changed: expected %s, got %s", cluster.Status.ClusterUID, clusterUID)
+			// 明示的な Adoption 指定があるか確認
+			isAdoptionRequested := cluster.Spec.Identity != nil &&
+				cluster.Spec.Identity.ExpectedUID == clusterUID &&
+				cluster.Spec.Identity.AdoptionGeneration > cluster.Status.ObservedAdoptionGeneration
+
+			if isAdoptionRequested {
+				log.Info("adopting new remote cluster identity UID", "oldUID", cluster.Status.ClusterUID, "newUID", clusterUID, "generation", cluster.Spec.Identity.AdoptionGeneration)
+				if r.Recorder != nil {
+					r.Recorder.Eventf(cluster, nil, corev1.EventTypeNormal, "ClusterAdopted", "Reconcile", "Adopted new cluster UID %s (generation %d)", clusterUID, cluster.Spec.Identity.AdoptionGeneration)
+				}
+				clusterKey := fmt.Sprintf("%s/%s", cluster.Namespace, cluster.Name)
+				r.RemoteProvider.InvalidateCache(clusterKey)
+				cluster.Status.ClusterUID = clusterUID
+				cluster.Status.ObservedAdoptionGeneration = cluster.Spec.Identity.AdoptionGeneration
+			} else {
+				log.Error(fmt.Errorf("cluster identity mismatch"), "remote cluster UID changed (expected %s, got %s)", cluster.Status.ClusterUID, clusterUID)
+				if r.Recorder != nil {
+					r.Recorder.Eventf(cluster, nil, corev1.EventTypeWarning, "ClusterIdentityMismatch", "Reconcile", "Remote cluster UID changed: expected %s, got %s", cluster.Status.ClusterUID, clusterUID)
+				}
+				conditions.SetCondition(&cluster.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonClusterIdentityMismatch, "Remote cluster identity mismatch; stopping mutation (requires explicit spec.identity adoption)")
+				cluster.Status.APIReachable = false
+				cluster.Status.Phase = ghav1alpha1.RunnerClusterPhaseDegraded
 			}
-			conditions.SetCondition(&cluster.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonClusterIdentityMismatch, "Remote cluster identity mismatch; stopping mutation")
-			cluster.Status.APIReachable = false
-			cluster.Status.Phase = ghav1alpha1.RunnerClusterPhaseDegraded
 		}
 	}
 
@@ -177,8 +194,17 @@ func (r *RunnerClusterReconciler) checkClusterHealth(ctx context.Context, cluste
 	}
 }
 
-func (r *RunnerClusterReconciler) updateStatus(ctx context.Context, cluster, orig *ghav1alpha1.RunnerCluster) error {
-	return r.Status().Patch(ctx, cluster, client.MergeFrom(orig))
+func (r *RunnerClusterReconciler) updateStatus(ctx context.Context, cluster, _ *ghav1alpha1.RunnerCluster) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var current ghav1alpha1.RunnerCluster
+		if err := r.Get(ctx, client.ObjectKeyFromObject(cluster), &current); err != nil {
+			return err
+		}
+		orig := current.DeepCopy()
+		current.Status = cluster.Status
+		patch := client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{})
+		return r.Status().Patch(ctx, &current, patch)
+	})
 }
 
 func (r *RunnerClusterReconciler) findClustersForMachine(ctx context.Context, obj client.Object) []ctrl.Request {

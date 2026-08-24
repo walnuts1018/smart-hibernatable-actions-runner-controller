@@ -78,6 +78,11 @@ func (r *RunnerMachine) ValidateCreate(_ context.Context, obj *RunnerMachine) (a
 func (r *RunnerMachine) ValidateUpdate(_ context.Context, oldObj, newObj *RunnerMachine) (admission.Warnings, error) {
 	runnermachinelog.Info("validate update RunnerMachine", "name", newObj.Name)
 
+	// 削除中のオブジェクト更新（Finalizer 削除など）は検証をスキップして Finalizer デッドロックを防止
+	if newObj.DeletionTimestamp != nil {
+		return nil, nil
+	}
+
 	var allErrs field.ErrorList
 	validateImmutableString(&allErrs, field.NewPath("spec", "clusterRef", "name"), oldObj.Spec.ClusterRef.Name, newObj.Spec.ClusterRef.Name)
 	validateImmutableString(&allErrs, field.NewPath("spec", "kubernetesNodeName"), oldObj.Spec.KubernetesNodeName, newObj.Spec.KubernetesNodeName)

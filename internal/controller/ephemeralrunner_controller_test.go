@@ -590,9 +590,10 @@ func TestEphemeralRunnerReconciler_PodFailedSnapshotAndTTL(t *testing.T) {
 		t.Errorf("expected remote pod to be immediately deleted")
 	}
 
-	// 2回目のReconcile (TTL経過後): 1時間以上経過したFinishedAtを設定してReconcile (Deleteが発行される)
+	// 2回目のReconcile (TTL経過後): 1時間以上経過したFinishedAt/GCEligibleAtを設定してReconcile (Deleteが発行される)
 	past := metav1.NewTime(time.Now().Add(-2 * time.Hour))
 	updatedRunner.Status.FinishedAt = &past
+	updatedRunner.Status.GCEligibleAt = &past
 	fakeClient.Status().Update(context.Background(), &updatedRunner)
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
@@ -712,6 +713,7 @@ func TestEphemeralRunnerReconciler_PodCompletedTTL(t *testing.T) {
 	// 2回目のReconcile (10分経過後): Deleteが発行される
 	past := metav1.NewTime(time.Now().Add(-15 * time.Minute))
 	updatedRunner.Status.FinishedAt = &past
+	updatedRunner.Status.GCEligibleAt = &past
 	fakeClient.Status().Update(context.Background(), &updatedRunner)
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{

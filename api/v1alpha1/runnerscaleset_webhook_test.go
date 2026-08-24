@@ -162,6 +162,32 @@ func TestRunnerScaleSetValidateCreate(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "privileged container forbidden",
+			mutate: func(ss *RunnerScaleSet) {
+				priv := true
+				ss.Spec.Runner.Template.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{
+					Privileged: &priv,
+				}
+			},
+			wantErr: true,
+		},
+		{
+			name: "hostNetwork forbidden",
+			mutate: func(ss *RunnerScaleSet) {
+				ss.Spec.Runner.Template.Spec.HostNetwork = true
+			},
+			wantErr: true,
+		},
+		{
+			name: "hostPath forbidden",
+			mutate: func(ss *RunnerScaleSet) {
+				vol := corev1.Volume{Name: "host-vol",
+					HostPath: &corev1.HostPathVolumeSource{Path: "/var/run/docker.sock"}}
+				ss.Spec.Runner.Template.Spec.Volumes = []corev1.Volume{vol}
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

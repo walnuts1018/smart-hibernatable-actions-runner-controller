@@ -2,13 +2,12 @@ package listener
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
-	"math/big"
 	"os"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/leaderelection"
@@ -24,22 +23,18 @@ import (
 var runnerLogger = ctrl.Log.WithName("listener-runner")
 
 func calculateBackoff(attempt int, base time.Duration, maxDelay time.Duration) time.Duration {
-	if attempt < 0 {
-		attempt = 0
+	b := wait.Backoff{
+		Duration: base,
+		Factor:   2.0,
+		Jitter:   0.2,
+		Cap:      maxDelay,
+		Steps:    attempt + 1,
 	}
-	multiplier := 1 << attempt
-	if multiplier <= 0 || multiplier > 1024 {
-		multiplier = 1024
+	dur := b.Duration
+	for i := 0; i < attempt; i++ {
+		dur = b.Step()
 	}
-	temp := base * time.Duration(multiplier)
-	if temp > maxDelay || temp <= 0 {
-		temp = maxDelay
-	}
-	n, err := rand.Int(rand.Reader, big.NewInt(int64(temp)))
-	if err != nil || n == nil {
-		return temp / 2
-	}
-	return time.Duration(n.Int64())
+	return dur
 }
 
 // RunnerOptions holds execution options for the listener process.
@@ -108,10 +103,12 @@ func RunListenerWithLease(ctx context.Context, opts RunnerOptions) error {
 }
 
 func waitWithContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		return false
-	case <-time.After(d):
+	case <-timer.C:
 		return true
 	}
 }
@@ -193,11 +190,11 @@ func runListenerSession(ctx context.Context, opts RunnerOptions, tracker *Readin
 			maxCapacity = 0
 		}
 
-		l, err := ghaClient.CreateListener(ctx, scaleSet.Status.ScaleSetID, maxCapacity, scaler, recorder)
+		sess, err := ghaClient.CreateListenerSession(ctx, scaleSet.Status.ScaleSetID, maxCapacity, scaler, recorder)
 		if err != nil {
 			backoff := calculateBackoff(attempt, 2*time.Second, 60*time.Second)
 			attempt++
-			runnerLogger.Error(err, "failed to initialize listener, retrying with backoff", "backoff", backoff)
+			runnerLogger.Error(err, "failed to initialize listener session (possible 409 handoff conflict), retrying with backoff", "backoff", backoff)
 			if !waitWithContext(ctx, backoff) {
 				return
 			}
@@ -225,7 +222,7 @@ func runListenerSession(ctx context.Context, opts RunnerOptions, tracker *Readin
 						}
 						if newMax != lastMax {
 							runnerLogger.Info("updating advertised maxCapacity on listener", "oldMax", lastMax, "newMax", newMax)
-							l.SetMaxRunners(newMax)
+							sess.Listener.SetMaxRunners(newMax)
 							lastMax = newMax
 						}
 					}
@@ -235,21 +232,28 @@ func runListenerSession(ctx context.Context, opts RunnerOptions, tracker *Readin
 
 		sessionStartTime := time.Now()
 		runnerLogger.Info("starting GitHub actions scale set listener session...", "maxCapacity", maxCapacity)
-		if err := l.Run(sessionCtx, scaler); err != nil {
-			cancel()
-			metrics.ListenerSessionUp.WithLabelValues(opts.Namespace, opts.Name).Set(0)
+		runErr := sess.Listener.Run(sessionCtx, scaler)
+
+		// セッション終了: cancel を呼び、MessageSessionClient.Close を明示的に呼んで GitHub 側セッションを即時解放
+		cancel()
+		closeCtx, closeCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		if closeErr := sess.Close(closeCtx); closeErr != nil {
+			runnerLogger.Error(closeErr, "failed to close listener message session cleanly")
+		}
+		closeCancel()
+
+		metrics.ListenerSessionUp.WithLabelValues(opts.Namespace, opts.Name).Set(0)
+		if runErr != nil {
 			if time.Since(sessionStartTime) > 30*time.Second {
 				attempt = 0 // 正常に30秒以上稼働していたらattemptをリセット
 			}
 			backoff := calculateBackoff(attempt, 1*time.Second, 60*time.Second)
 			attempt++
-			runnerLogger.Error(err, "listener session ended with error, restarting with backoff", "backoff", backoff)
+			runnerLogger.Error(runErr, "listener session ended with error, restarting with backoff", "backoff", backoff)
 			if !waitWithContext(ctx, backoff) {
 				return
 			}
 		} else {
-			cancel()
-			metrics.ListenerSessionUp.WithLabelValues(opts.Namespace, opts.Name).Set(0)
 			attempt = 0
 		}
 	}

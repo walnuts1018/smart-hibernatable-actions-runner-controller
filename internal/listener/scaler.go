@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
@@ -90,6 +91,10 @@ func (s *ScalerHandler) HandleJobStarted(ctx context.Context, jobInfo *scaleset.
 	}
 	scalerLogger.Info("job started on runner", "runnerName", jobInfo.RunnerName)
 
+	if !jobInfo.QueueTime.IsZero() {
+		metrics.JobQueueToStartedObservedSeconds.WithLabelValues(s.namespace, s.name).Observe(time.Since(jobInfo.QueueTime).Seconds())
+	}
+
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		var epRunner ghav1alpha1.EphemeralRunner
 		if err := s.client.Get(ctx, client.ObjectKey{Namespace: s.namespace, Name: jobInfo.RunnerName}, &epRunner); err != nil {
@@ -113,6 +118,10 @@ func (s *ScalerHandler) HandleJobStarted(ctx context.Context, jobInfo *scaleset.
 		epRunner.Status.GitHub.RunnerID = int64(jobInfo.RunnerID)
 		if jobID, err := strconv.ParseInt(jobInfo.JobID, 10, 64); err == nil {
 			epRunner.Status.GitHub.JobID = jobID
+		}
+		if epRunner.Status.GitHub.StartedObservedAt == nil {
+			now := metav1.Now()
+			epRunner.Status.GitHub.StartedObservedAt = &now
 		}
 		patch := client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{})
 		return s.client.Status().Patch(ctx, &epRunner, patch)

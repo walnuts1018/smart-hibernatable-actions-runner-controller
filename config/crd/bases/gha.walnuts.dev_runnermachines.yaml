@@ -117,6 +117,14 @@ spec:
                     description: Enabled indicates whether the machine is in maintenance
                       mode.
                     type: boolean
+                  powerPolicy:
+                    default: Preserve
+                    description: PowerPolicy defines whether to preserve power or
+                      power off after draining during maintenance.
+                    enum:
+                    - Preserve
+                    - PowerOff
+                    type: string
                 type: object
               priority:
                 default: 100
@@ -326,6 +334,11 @@ spec:
                       dispatched.
                     format: int32
                     type: integer
+                  drainVerifiedAt:
+                    description: DrainVerifiedAt is the timestamp when the node was
+                      verified to have 0 active runner pods before initiating shutdown.
+                    format: date-time
+                    type: string
                   lastAttemptAt:
                     description: LastAttemptAt is the timestamp when the operation
                       command was last sent to Redfish.

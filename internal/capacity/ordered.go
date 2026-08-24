@@ -80,21 +80,29 @@ func (p *orderedCapacityPlanner) Plan(machines []MachineCapacity, requiredRunner
 		}
 	}
 
-	// Phase 2: 残りのマシンを（Ready -> PoweredOn -> Priority昇順 -> Name昇順）でソート
+	// Phase 2: 残りのマシンを（PreviouslyDesired -> ActiveRunners降順 -> Ready -> PoweredOn -> Priority昇順 -> Name昇順）でソート
 	sort.SliceStable(candidates, func(i, j int) bool {
-		// 1. Ready状態優先
+		// 0. 前回選択されていたマシンへの Stickiness 優先 (フラッピング・不要な cold start 防止)
+		if candidates[i].PreviouslyDesired != candidates[j].PreviouslyDesired {
+			return candidates[i].PreviouslyDesired
+		}
+		// 1. 実行中Runner数降順 (Bin-packing: 稼働中Runnerが多いマシンを優先残存、空きマシンから優先Drain)
+		if candidates[i].ActiveRunners != candidates[j].ActiveRunners {
+			return candidates[i].ActiveRunners > candidates[j].ActiveRunners
+		}
+		// 2. Ready状態優先
 		if candidates[i].Ready != candidates[j].Ready {
 			return candidates[i].Ready
 		}
-		// 2. PoweredOn優先
+		// 3. PoweredOn優先
 		if candidates[i].PoweredOn != candidates[j].PoweredOn {
 			return candidates[i].PoweredOn
 		}
-		// 3. Priority昇順 (小さい値ほど高優先)
+		// 4. Priority昇順 (小さい値ほど高優先)
 		if candidates[i].Priority != candidates[j].Priority {
 			return candidates[i].Priority < candidates[j].Priority
 		}
-		// 4. 名前昇順で安定化
+		// 5. 名前昇順で安定化
 		return candidates[i].Machine.Name < candidates[j].Machine.Name
 	})
 

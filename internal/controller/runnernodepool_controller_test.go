@@ -139,8 +139,14 @@ func TestRunnerNodePoolReconciler_DesiredMachinesPlanning(t *testing.T) {
 	}
 
 	// 2. 需要が0になった場合（m1もm2もOffとして計画され、IdleSinceが開始される）
-	scaleSet.Status.DesiredRunners = 0
-	fakeClient.Status().Update(context.Background(), scaleSet)
+	var currentSS ghav1alpha1.RunnerScaleSet
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "ss1"}, &currentSS); err != nil {
+		t.Fatalf("failed to get current scale set: %v", err)
+	}
+	currentSS.Status.DesiredRunners = 0
+	if err := fakeClient.Status().Update(context.Background(), &currentSS); err != nil {
+		t.Fatalf("failed to update scale set status: %v", err)
+	}
 
 	_, err = r.Reconcile(context.Background(), ctrl.Request{
 		Namespace: "default", Name: "p1",

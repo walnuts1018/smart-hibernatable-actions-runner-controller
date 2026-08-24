@@ -20,6 +20,7 @@ import (
 	metav1apply "k8s.io/client-go/applyconfigurations/meta/v1"
 	rbacv1apply "k8s.io/client-go/applyconfigurations/rbac/v1"
 	"k8s.io/client-go/tools/events"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -230,8 +231,23 @@ func (r *RunnerScaleSetReconciler) reconcileDeletion(
 	return ctrl.Result{}, nil
 }
 
-func (r *RunnerScaleSetReconciler) updateStatus(ctx context.Context, ss, orig *ghav1alpha1.RunnerScaleSet) error {
-	return r.Status().Patch(ctx, ss, client.MergeFrom(orig))
+func (r *RunnerScaleSetReconciler) updateStatus(ctx context.Context, ss, _ *ghav1alpha1.RunnerScaleSet) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var current ghav1alpha1.RunnerScaleSet
+		if err := r.Get(ctx, client.ObjectKeyFromObject(ss), &current); err != nil {
+			return err
+		}
+		orig := current.DeepCopy()
+
+		// Manager の担当フィールドをマージ (Listener の DesiredRunners / GitHub / Listener ステータスを尊重)
+		current.Status.ScaleSetID = ss.Status.ScaleSetID
+		current.Status.EffectiveMaxRunners = ss.Status.EffectiveMaxRunners
+		current.Status.ActiveRunners = ss.Status.ActiveRunners
+		current.Status.Conditions = ss.Status.Conditions
+
+		patch := client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{})
+		return r.Status().Patch(ctx, &current, patch)
+	})
 }
 
 func (r *RunnerScaleSetReconciler) reconcileGitHub(ctx context.Context, ss *ghav1alpha1.RunnerScaleSet) error {

@@ -108,12 +108,20 @@ var (
 		},
 		[]string{labelNamespace, labelName},
 	)
+	// MachinePoweredOn measures whether the physical machine is currently powered on (1 for on, 0 for off).
+	MachinePoweredOn = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "gha_baremetal_machine_powered_on",
+			Help: "Whether the physical machine is currently powered on (1 for on, 0 for off).",
+		},
+		[]string{labelNamespace, labelName},
+	)
 	// ColdStartSeconds observes time taken from machine power on until Kubernetes node Ready.
 	ColdStartSeconds = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "gha_baremetal_cold_start_seconds",
 			Help:    "Time in seconds taken from machine power on until Kubernetes node Ready.",
-			Buckets: prometheus.ExponentialBuckets(10, 1.5, 10),
+			Buckets: []float64{30, 60, 90, 120, 180, 240, 300, 420, 600, 900},
 		},
 		[]string{labelNamespace, labelName},
 	)
@@ -122,7 +130,16 @@ var (
 		prometheus.HistogramOpts{
 			Name:    "gha_baremetal_runner_provision_seconds",
 			Help:    "Time in seconds taken to provision and start an ephemeral runner pod.",
-			Buckets: prometheus.ExponentialBuckets(1, 2, 8),
+			Buckets: []float64{1, 2, 5, 10, 20, 30, 60, 120},
+		},
+		[]string{labelNamespace, labelName},
+	)
+	// JobQueueToStartedObservedSeconds observes end-to-end duration from GitHub Job QueueTime until JobStarted observed.
+	JobQueueToStartedObservedSeconds = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "gha_baremetal_job_queue_to_started_observed_seconds",
+			Help:    "Duration in seconds from GitHub actions job QueueTime until JobStarted is observed by SHARC.",
+			Buckets: []float64{5, 15, 30, 60, 120, 180, 300, 600, 900},
 		},
 		[]string{labelNamespace, labelName},
 	)
@@ -143,11 +160,43 @@ var (
 		},
 		[]string{labelNamespace, labelName},
 	)
+	// CapacityDemand measures total aggregated runner demand for the node pool.
+	CapacityDemand = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "gha_runner_capacity_demand",
+			Help: "Total aggregated runner demand across all referencing scale sets.",
+		},
+		[]string{labelNamespace, labelName},
+	)
+	// CapacityCommitted measures total committed runner capacity (Ready + PoweringOn).
+	CapacityCommitted = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "gha_runner_capacity_committed",
+			Help: "Total committed runner capacity (Ready + PoweringOn selected machines).",
+		},
+		[]string{labelNamespace, labelName},
+	)
+	// CapacityReady measures currently ready and schedulable runner capacity.
+	CapacityReady = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "gha_runner_capacity_ready",
+			Help: "Currently ready and schedulable runner capacity.",
+		},
+		[]string{labelNamespace, labelName},
+	)
 	// CapacityDeficit measures deficit of ready runner capacity compared to desired runners.
 	CapacityDeficit = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "gha_runner_capacity_deficit",
-			Help: "Deficit of ready runner capacity compared to desired runners (desired - ready, clamped to >= 0).",
+			Help: "Deficit of ready runner capacity compared to desired runners (demand - ready, clamped to >= 0).",
+		},
+		[]string{labelNamespace, labelName},
+	)
+	// UncommittedDeficit measures demand that is not yet covered by committed capacity.
+	UncommittedDeficit = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "gha_runner_capacity_uncommitted_deficit",
+			Help: "Deficit of committed capacity compared to demand (demand - committed, clamped to >= 0).",
 		},
 		[]string{labelNamespace, labelName},
 	)
@@ -190,13 +239,19 @@ func init() {
 		PoweredOnNodes,
 		ReadyNodes,
 		MachinePowerState,
+		MachinePoweredOn,
 		PowerTransitionsTotal,
 		ClusterAPIReachable,
 		ColdStartSeconds,
 		RunnerProvisionSeconds,
+		JobQueueToStartedObservedSeconds,
 		ListenerSessionUp,
 		ListenerLastSuccessfulPoll,
+		CapacityDemand,
+		CapacityCommitted,
+		CapacityReady,
 		CapacityDeficit,
+		UncommittedDeficit,
 		EffectiveMaxRunners,
 		RedfishRequestsTotal,
 		RedfishRequestDuration,

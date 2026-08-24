@@ -7,33 +7,39 @@ import (
 func TestReadinessTracker(t *testing.T) {
 	tracker := NewReadinessTracker()
 
-	if tracker.IsReady() {
-		t.Fatal("expected tracker to not be ready initially")
+	// Initialized process is ready for Kubernetes readiness probe
+	if !tracker.IsReady() {
+		t.Fatal("expected tracker to be ready (initialized) for Kubernetes probe")
+	}
+
+	// But not leader yet
+	if tracker.IsLeader() {
+		t.Fatal("expected tracker to not be leader initially")
 	}
 
 	tracker.SetLeaseAcquired(true)
-	if tracker.IsReady() {
-		t.Fatal("expected tracker to not be ready with only lease")
+	if tracker.IsLeader() {
+		t.Fatal("expected tracker to not be leader with only lease")
 	}
 
 	tracker.SetGitHubAuthenticated(true)
-	if tracker.IsReady() {
-		t.Fatal("expected tracker to not be ready with lease and auth")
+	if tracker.IsLeader() {
+		t.Fatal("expected tracker to not be leader with lease and auth")
 	}
 
 	tracker.SetSessionEstablished(true)
-	if tracker.IsReady() {
-		t.Fatal("expected tracker to not be ready without initial statistics")
+	if tracker.IsLeader() {
+		t.Fatal("expected tracker to not be leader without initial statistics")
 	}
 
 	tracker.SetInitialStatisticsReceived(true)
-	if !tracker.IsReady() {
-		t.Fatal("expected tracker to be ready when all conditions are true")
+	if !tracker.IsLeader() {
+		t.Fatal("expected tracker to be leader when all conditions are true")
 	}
 
 	tracker.Reset()
-	if tracker.IsReady() {
-		t.Fatal("expected tracker to not be ready after reset")
+	if tracker.IsLeader() {
+		t.Fatal("expected tracker to not be leader after reset")
 	}
 	if !tracker.leaseAcquired {
 		t.Fatal("expected leaseAcquired to remain true after reset")

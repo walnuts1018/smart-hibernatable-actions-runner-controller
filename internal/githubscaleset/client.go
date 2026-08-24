@@ -43,8 +43,25 @@ type ScaleSetClient interface {
 	// RemoveRunner removes an individual runner from the scale set in GitHub Actions.
 	RemoveRunner(ctx context.Context, runnerID int64) error
 
-	// CreateListener creates a new listener instance for this scale set.
+	// CreateListenerSession creates a new listener session (including MessageSessionClient) for this scale set.
+	CreateListenerSession(ctx context.Context, scaleSetID int64, maxCapacity int, scaler listener.Scaler, recorder listener.MetricsRecorder) (*ListenerSession, error)
+
+	// CreateListener creates a new listener instance for this scale set (for backward compatibility).
 	CreateListener(ctx context.Context, scaleSetID int64, maxCapacity int, scaler listener.Scaler, recorder listener.MetricsRecorder) (*listener.Listener, error)
+}
+
+// ListenerSession pairs a Listener with its underlying MessageSessionClient for graceful shutdown.
+type ListenerSession struct {
+	Listener      *listener.Listener
+	SessionClient *scaleset.MessageSessionClient
+}
+
+// Close gracefully closes the GitHub Actions message session.
+func (s *ListenerSession) Close(ctx context.Context) error {
+	if s.SessionClient != nil {
+		return s.SessionClient.Close(ctx)
+	}
+	return nil
 }
 
 // ScaleSetClientFactory creates ScaleSetClient instances.
@@ -161,7 +178,7 @@ func (c *clientImpl) RemoveRunner(ctx context.Context, runnerID int64) error {
 	return nil
 }
 
-func (c *clientImpl) CreateListener(ctx context.Context, scaleSetID int64, maxCapacity int, _ listener.Scaler, recorder listener.MetricsRecorder) (*listener.Listener, error) {
+func (c *clientImpl) CreateListenerSession(ctx context.Context, scaleSetID int64, maxCapacity int, _ listener.Scaler, recorder listener.MetricsRecorder) (*ListenerSession, error) {
 	opts := []listener.Option{}
 	if recorder != nil {
 		opts = append(opts, listener.WithMetricsRecorder(recorder))
@@ -180,5 +197,16 @@ func (c *clientImpl) CreateListener(ctx context.Context, scaleSetID int64, maxCa
 		return nil, fmt.Errorf("failed to create listener: %w", err)
 	}
 
-	return l, nil
+	return &ListenerSession{
+		Listener:      l,
+		SessionClient: sessionClient,
+	}, nil
+}
+
+func (c *clientImpl) CreateListener(ctx context.Context, scaleSetID int64, maxCapacity int, scaler listener.Scaler, recorder listener.MetricsRecorder) (*listener.Listener, error) {
+	sess, err := c.CreateListenerSession(ctx, scaleSetID, maxCapacity, scaler, recorder)
+	if err != nil {
+		return nil, err
+	}
+	return sess.Listener, nil
 }

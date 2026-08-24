@@ -15,6 +15,16 @@ func BuildRunnerPod(namespace string, scaleSet *ghav1alpha1.RunnerScaleSet, runn
 
 	podSpec.RestartPolicy = corev1.RestartPolicyNever
 
+	// デフォルトで不要な ServiceAccount Token マウントと ServiceLinks を無効化
+	if podSpec.AutomountServiceAccountToken == nil {
+		f := false
+		podSpec.AutomountServiceAccountToken = &f
+	}
+	if podSpec.EnableServiceLinks == nil {
+		f := false
+		podSpec.EnableServiceLinks = &f
+	}
+
 	targetContainerName := scaleSet.Spec.Runner.ContainerName
 	if targetContainerName == "" {
 		targetContainerName = DefaultContainerName

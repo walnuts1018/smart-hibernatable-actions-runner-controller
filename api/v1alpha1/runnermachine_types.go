@@ -191,12 +191,28 @@ type RunnerMachineSpec struct {
 	Maintenance *MachineMaintenanceSpec `json:"maintenance,omitempty"`
 }
 
+// MaintenancePowerPolicy defines power handling during maintenance mode.
+// +kubebuilder:validation:Enum=Preserve;PowerOff
+type MaintenancePowerPolicy string
+
+const (
+	// MaintenancePowerPolicyPreserve keeps the machine powered on during maintenance.
+	MaintenancePowerPolicyPreserve MaintenancePowerPolicy = "Preserve"
+	// MaintenancePowerPolicyPowerOff powers off the machine after draining during maintenance.
+	MaintenancePowerPolicyPowerOff MaintenancePowerPolicy = "PowerOff"
+)
+
 // MachineMaintenanceSpec defines maintenance mode settings.
 type MachineMaintenanceSpec struct {
 	// Enabled indicates whether the machine is in maintenance mode.
 	// +kubebuilder:default=false
 	// +optional
 	Enabled bool `json:"enabled,omitempty"`
+
+	// PowerPolicy defines whether to preserve power or power off after draining during maintenance.
+	// +kubebuilder:default="Preserve"
+	// +optional
+	PowerPolicy MaintenancePowerPolicy `json:"powerPolicy,omitempty"`
 }
 
 // MachineQuarantineStatus records quarantine state when a machine repeatedly fails health/node checks.
@@ -239,6 +255,10 @@ type PowerOperationStatus struct {
 
 	// LastAttemptAt is the timestamp when the operation command was last sent to Redfish.
 	LastAttemptAt metav1.Time `json:"lastAttemptAt"`
+
+	// DrainVerifiedAt is the timestamp when the node was verified to have 0 active runner pods before initiating shutdown.
+	// +optional
+	DrainVerifiedAt *metav1.Time `json:"drainVerifiedAt,omitempty"`
 
 	// Attempts is the number of times the command has been dispatched.
 	// +kubebuilder:default=1

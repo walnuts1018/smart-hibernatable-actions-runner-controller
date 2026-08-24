@@ -78,6 +78,11 @@ func (r *RunnerNodePool) ValidateCreate(_ context.Context, obj *RunnerNodePool) 
 func (r *RunnerNodePool) ValidateUpdate(_ context.Context, oldObj, newObj *RunnerNodePool) (admission.Warnings, error) {
 	runnernodepoollog.Info("validate update RunnerNodePool", "name", newObj.Name)
 
+	// 削除中のオブジェクト更新（Finalizer 削除など）は検証をスキップして Finalizer デッドロックを防止
+	if newObj.DeletionTimestamp != nil {
+		return nil, nil
+	}
+
 	var allErrs field.ErrorList
 
 	// 不変フィールドの検証

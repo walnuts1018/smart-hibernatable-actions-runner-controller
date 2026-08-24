@@ -3,6 +3,7 @@ package remotecluster
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -30,13 +32,14 @@ type Provider interface {
 	// GetClusterUID retrieves the unique cluster UID (kube-system namespace UID) from the remote cluster.
 	GetClusterUID(ctx context.Context, cluster *ghav1alpha1.RunnerCluster) (string, error)
 
-	// InvalidateCache drops any cached client for the given cluster.
+	// InvalidateCache drops any cached client for the given cluster and closes idle connections.
 	InvalidateCache(clusterKey string)
 }
 
 type cachedClient struct {
 	client          client.Client
 	discoveryClient discovery.DiscoveryInterface
+	httpClient      *http.Client
 	resourceVersion string
 	lastUsed        time.Time
 }
@@ -120,12 +123,20 @@ func (p *providerImpl) getCachedOrCreate(ctx context.Context, cluster *ghav1alph
 	}
 	restConfig.Timeout = timeout
 
-	cl, err := client.New(restConfig, client.Options{Scheme: p.scheme})
+	httpClient, err := rest.HTTPClientFor(restConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create http client for remote cluster %s: %w", clusterKey, err)
+	}
+
+	cl, err := client.New(restConfig, client.Options{
+		Scheme:     p.scheme,
+		HTTPClient: httpClient,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create client for remote cluster %s: %w", clusterKey, err)
 	}
 
-	disc, err := discovery.NewDiscoveryClientForConfig(restConfig)
+	disc, err := discovery.NewDiscoveryClientForConfigAndClient(restConfig, httpClient)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create discovery client for remote cluster %s: %w", clusterKey, err)
 	}
@@ -133,6 +144,7 @@ func (p *providerImpl) getCachedOrCreate(ctx context.Context, cluster *ghav1alph
 	newEntry := &cachedClient{
 		client:          cl,
 		discoveryClient: disc,
+		httpClient:      httpClient,
 		resourceVersion: rv,
 		lastUsed:        time.Now(),
 	}
@@ -209,7 +221,12 @@ func (p *providerImpl) GetClusterUID(ctx context.Context, cluster *ghav1alpha1.R
 func (p *providerImpl) InvalidateCache(clusterKey string) {
 	p.cacheMu.Lock()
 	defer p.cacheMu.Unlock()
-	delete(p.clients, clusterKey)
+	if cached, ok := p.clients[clusterKey]; ok {
+		if cached.httpClient != nil {
+			cached.httpClient.CloseIdleConnections()
+		}
+		delete(p.clients, clusterKey)
+	}
 }
 
 // IsNodeReady checks if a Kubernetes Node has ConditionReady=True.

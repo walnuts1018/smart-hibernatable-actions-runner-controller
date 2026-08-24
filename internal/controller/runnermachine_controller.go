@@ -10,7 +10,9 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/events"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -92,17 +94,25 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return *earlyResult, nil
 	}
 
-	// 5. DesiredStateに応じた電源操作・Cordon制御
+	// 5. メンテナンスモードまたはDesiredStateに応じた電源操作・Cordon制御
 	requeueAfter := 30 * time.Second
-	switch desiredState {
-	case ghav1alpha1.MachineDesiredStateActive:
-		requeueAfter = r.reconcileActive(ctx, &machine, &cluster, remoteNode, pwrCtrl)
-	case ghav1alpha1.MachineDesiredStateOff:
-		requeueAfter = r.reconcileOff(ctx, &machine, &cluster, nodePool, remoteNode, pwrCtrl, drainStartedAt)
+	if machine.Spec.Maintenance != nil && machine.Spec.Maintenance.Enabled {
+		requeueAfter = r.reconcileMaintenance(ctx, &machine, &cluster, remoteNode, pwrCtrl)
+	} else {
+		conditions.RemoveCondition(&machine.Status.Conditions, conditions.TypeMaintenance)
+		conditions.RemoveCondition(&machine.Status.Conditions, conditions.TypeMaintenanceReady)
+		switch desiredState {
+		case ghav1alpha1.MachineDesiredStateActive:
+			requeueAfter = r.reconcileActive(ctx, &machine, &cluster, remoteNode, pwrCtrl)
+		case ghav1alpha1.MachineDesiredStateOff:
+			requeueAfter = r.reconcileOff(ctx, &machine, &cluster, nodePool, remoteNode, pwrCtrl, drainStartedAt)
+		}
 	}
 
 	// 6. Overall Ready Condition の設定
-	if machine.Status.PowerState == ghav1alpha1.PowerStateOn && machine.Status.Kubernetes.Ready {
+	if machine.Spec.Maintenance != nil && machine.Spec.Maintenance.Enabled {
+		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonMaintenance, "Machine is under maintenance")
+	} else if machine.Status.PowerState == ghav1alpha1.PowerStateOn && machine.Status.Kubernetes.Ready {
 		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeReady, metav1.ConditionTrue, conditions.ReasonReady, "Machine is powered on and Node is Ready")
 	} else if machine.Status.PowerState == ghav1alpha1.PowerStateOff && desiredState == ghav1alpha1.MachineDesiredStateOff {
 		conditions.SetCondition(&machine.Status.Conditions, conditions.TypeReady, metav1.ConditionTrue, conditions.ReasonScaledToZero, "Machine is powered off (scaled to zero)")
@@ -116,6 +126,7 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		stateVal = 1.0
 	}
 	metrics.MachinePowerState.WithLabelValues(machine.Namespace, machine.Name, string(machine.Status.PowerState)).Set(stateVal)
+	metrics.MachinePoweredOn.WithLabelValues(machine.Namespace, machine.Name).Set(stateVal)
 
 	// Status更新
 	if err := r.updateStatus(ctx, &machine, origMachine); err != nil {
@@ -328,6 +339,56 @@ func (r *RunnerMachineReconciler) ensureCordoned(
 	return CordonOwnedBySHARC, nil
 }
 
+func (r *RunnerMachineReconciler) reconcileMaintenance(
+	ctx context.Context,
+	m *ghav1alpha1.RunnerMachine,
+	cluster *ghav1alpha1.RunnerCluster,
+	remoteNode *corev1.Node,
+	pwrCtrl redfish.PowerController,
+) time.Duration {
+	log := logf.FromContext(ctx)
+	log.Info("machine is in maintenance mode", "machine", m.Name)
+	conditions.SetCondition(&m.Status.Conditions, conditions.TypeMaintenance, metav1.ConditionTrue, conditions.ReasonMaintenance, "Machine is under maintenance")
+
+	// 1. ノードを Cordon して新規ジョブ割り当てを阻止
+	if remoteNode != nil {
+		if remoteClient, clientErr := r.RemoteProvider.GetClient(ctx, cluster); clientErr == nil {
+			_, _ = r.ensureCordoned(ctx, remoteClient, remoteNode, m.UID)
+		}
+	}
+
+	// 2. 実行中 Pod を確認
+	activePods, err := r.countActiveRunnerPodsOnNode(ctx, cluster, m.Spec.KubernetesNodeName)
+	if err != nil {
+		log.Error(err, "failed to count active runner pods during maintenance reconciliation")
+		return 5 * time.Second
+	}
+
+	if activePods > 0 {
+		log.Info("waiting for active runner pods to finish before maintenance ready", "machine", m.Name, "activePods", activePods)
+		conditions.SetCondition(&m.Status.Conditions, conditions.TypeMaintenanceReady, metav1.ConditionFalse, conditions.ReasonDraining, fmt.Sprintf("Waiting for %d runner pods to finish", activePods))
+		return 5 * time.Second
+	}
+
+	// 3. Pod = 0 に到達後、PowerPolicy に応じた処理
+	powerPolicy := ghav1alpha1.MaintenancePowerPolicyPreserve
+	if m.Spec.Maintenance != nil && m.Spec.Maintenance.PowerPolicy != "" {
+		powerPolicy = m.Spec.Maintenance.PowerPolicy
+	}
+
+	if powerPolicy == ghav1alpha1.MaintenancePowerPolicyPowerOff && m.Status.PowerState == ghav1alpha1.PowerStateOn {
+		if m.Status.Operation == nil || m.Status.Operation.Type != ghav1alpha1.PowerOperationTypeGracefulShutdown {
+			r.initiateGracefulShutdown(ctx, m, pwrCtrl)
+		}
+		conditions.SetCondition(&m.Status.Conditions, conditions.TypeMaintenanceReady, metav1.ConditionFalse, conditions.ReasonPowerTransitioning, "Powering off machine for maintenance")
+		return 5 * time.Second
+	}
+
+	// 4. Maintenance Ready 完了
+	conditions.SetCondition(&m.Status.Conditions, conditions.TypeMaintenanceReady, metav1.ConditionTrue, "Ready", "Machine is drained and ready for maintenance")
+	return 1 * time.Minute
+}
+
 func (r *RunnerMachineReconciler) reconcileActive(
 	ctx context.Context,
 	m *ghav1alpha1.RunnerMachine,
@@ -336,13 +397,6 @@ func (r *RunnerMachineReconciler) reconcileActive(
 	pwrCtrl redfish.PowerController,
 ) time.Duration {
 	log := logf.FromContext(ctx)
-
-	// メンテナンスモードの場合は電源操作を行わない
-	if m.Spec.Maintenance != nil && m.Spec.Maintenance.Enabled {
-		log.Info("machine is in maintenance mode, skipping power management", "machine", m.Name)
-		conditions.SetCondition(&m.Status.Conditions, conditions.TypeMaintenance, metav1.ConditionTrue, conditions.ReasonMaintenance, "Machine is under maintenance")
-		return 1 * time.Minute
-	}
 
 	// 1. Shutdown Commit Point以降の方向転換保護: シャットダウン処理中の場合はまずOffになるのを待つ
 	if m.Status.Operation != nil && (m.Status.Operation.Type == ghav1alpha1.PowerOperationTypeGracefulShutdown || m.Status.Operation.Type == ghav1alpha1.PowerOperationTypeForceOff) {
@@ -356,10 +410,25 @@ func (r *RunnerMachineReconciler) reconcileActive(
 
 	// 2. もし電源OFFならPowerOnを実行
 	if m.Status.PowerState == ghav1alpha1.PowerStateOff {
+		observationGrace := 60 * time.Second
 		if m.Status.Operation != nil && m.Status.Operation.Type == ghav1alpha1.PowerOperationTypePowerOn {
-			if time.Since(m.Status.Operation.LastAttemptAt.Time) < 30*time.Second {
-				log.Info("skipping duplicate PowerOn command within debounce interval", "machine", m.Name)
+			elapsed := time.Since(m.Status.Operation.LastAttemptAt.Time)
+			if elapsed < observationGrace {
+				log.Info("within PowerOn observation grace period; observing without issuing duplicate command", "machine", m.Name, "elapsed", elapsed, "grace", observationGrace)
 				return 10 * time.Second
+			}
+
+			// ObservationGrace経過後もOffのまま試行回数が3回以上の場合、Quarantine判定
+			if m.Status.Operation.Attempts >= 3 {
+				log.Info("machine failed to power on after multiple attempts; putting into quarantine", "machine", m.Name, "attempts", m.Status.Operation.Attempts)
+				now := metav1.Now()
+				m.Status.Quarantine = &ghav1alpha1.MachineQuarantineStatus{
+					Reason:              "PowerOnNotObserved",
+					Since:               now,
+					ConsecutiveFailures: m.Status.Operation.Attempts,
+				}
+				conditions.SetCondition(&m.Status.Conditions, conditions.TypeQuarantined, metav1.ConditionTrue, "PowerOnNotObserved", fmt.Sprintf("Machine failed to reach PoweringOn/On state after %d PowerOn attempts", m.Status.Operation.Attempts))
+				return 1 * time.Minute
 			}
 		}
 
@@ -370,12 +439,14 @@ func (r *RunnerMachineReconciler) reconcileActive(
 
 		now := metav1.Now()
 		attempts := int32(1)
+		startedAt := now
 		if m.Status.Operation != nil && m.Status.Operation.Type == ghav1alpha1.PowerOperationTypePowerOn {
 			attempts = m.Status.Operation.Attempts + 1
+			startedAt = m.Status.Operation.StartedAt
 		}
 		m.Status.Operation = &ghav1alpha1.PowerOperationStatus{
 			Type:          ghav1alpha1.PowerOperationTypePowerOn,
-			StartedAt:     now,
+			StartedAt:     startedAt,
 			LastAttemptAt: now,
 			Attempts:      attempts,
 		}
@@ -399,37 +470,53 @@ func (r *RunnerMachineReconciler) reconcileActive(
 	}
 
 	// 4. 電源ONかつNodeがReadyなら、自身が設定したCordonのみ解除（外部Cordonは保護）
-	if m.Status.PowerState == ghav1alpha1.PowerStateOn && remoteNode != nil && m.Status.Kubernetes.Ready {
-		if remoteNode.Spec.Unschedulable && remoteNode.Annotations != nil && remoteNode.Annotations[runner.AnnotationCordonedBy] == string(m.UID) {
-			remoteClient, err := r.RemoteProvider.GetClient(ctx, cluster)
-			if err == nil {
-				origNode := remoteNode.DeepCopy()
-				remoteNode.Spec.Unschedulable = false
-				delete(remoteNode.Annotations, runner.AnnotationCordonedBy)
-				if patchErr := remoteClient.Patch(ctx, remoteNode, client.MergeFrom(origNode)); patchErr == nil {
-					log.Info("uncordoned node after machine became ready", "node", remoteNode.Name, "machine", m.Name)
-				}
-			}
-		}
-	}
+	r.ensureUncordonIfReady(ctx, m, cluster, remoteNode)
 
-	// 5. Quarantine安定化判定: Nodeが2分間継続してReadyならQuarantine解除
-	if m.Status.Quarantine != nil {
-		if m.Status.Kubernetes.Ready {
-			now := metav1.Now()
-			if m.Status.Quarantine.HealthySince == nil {
-				m.Status.Quarantine.HealthySince = &now
-			} else if time.Since(m.Status.Quarantine.HealthySince.Time) >= 2*time.Minute {
-				log.Info("clearing quarantine after stabilization period", "machine", m.Name)
-				m.Status.Quarantine = nil
-				conditions.SetCondition(&m.Status.Conditions, conditions.TypeQuarantined, metav1.ConditionFalse, conditions.ReasonReady, "Machine is stable and healthy")
-			}
-		} else {
-			m.Status.Quarantine.HealthySince = nil
-		}
-	}
+	// 5. Quarantine安定化判定: Nodeが10分間継続してReadyならQuarantine解除
+	r.reconcileQuarantineRecovery(m)
 
 	return 30 * time.Second
+}
+
+func (r *RunnerMachineReconciler) ensureUncordonIfReady(ctx context.Context, m *ghav1alpha1.RunnerMachine, cluster *ghav1alpha1.RunnerCluster, remoteNode *corev1.Node) {
+	log := logf.FromContext(ctx)
+	if m.Status.PowerState != ghav1alpha1.PowerStateOn || remoteNode == nil || !m.Status.Kubernetes.Ready {
+		return
+	}
+	if remoteNode.Spec.Unschedulable && remoteNode.Annotations != nil && remoteNode.Annotations[runner.AnnotationCordonedBy] == string(m.UID) {
+		remoteClient, err := r.RemoteProvider.GetClient(ctx, cluster)
+		if err == nil {
+			origNode := remoteNode.DeepCopy()
+			remoteNode.Spec.Unschedulable = false
+			delete(remoteNode.Annotations, runner.AnnotationCordonedBy)
+			if patchErr := remoteClient.Patch(ctx, remoteNode, client.MergeFrom(origNode)); patchErr == nil {
+				log.Info("uncordoned node after machine became ready", "node", remoteNode.Name, "machine", m.Name)
+			}
+		}
+	}
+}
+
+func (r *RunnerMachineReconciler) reconcileQuarantineRecovery(m *ghav1alpha1.RunnerMachine) {
+	log := logf.Log.WithName("quarantine-recovery")
+	if m.Status.Quarantine == nil {
+		return
+	}
+	if m.Status.Quarantine.Reason == conditions.ReasonMachineIDMismatch {
+		log.Info("machine is quarantined due to MachineIDMismatch; automatic recovery is blocked (requires explicit annotation)", "machine", m.Name)
+		return
+	}
+	if m.Status.Kubernetes.Ready {
+		now := metav1.Now()
+		if m.Status.Quarantine.HealthySince == nil {
+			m.Status.Quarantine.HealthySince = &now
+		} else if time.Since(m.Status.Quarantine.HealthySince.Time) >= 10*time.Minute {
+			log.Info("clearing quarantine after continuous 10m stabilization period", "machine", m.Name)
+			m.Status.Quarantine = nil
+			conditions.SetCondition(&m.Status.Conditions, conditions.TypeQuarantined, metav1.ConditionFalse, conditions.ReasonReady, "Machine is stable and healthy")
+		}
+	} else {
+		m.Status.Quarantine.HealthySince = nil
+	}
 }
 
 func (r *RunnerMachineReconciler) reconcileOff(
@@ -443,10 +530,9 @@ func (r *RunnerMachineReconciler) reconcileOff(
 ) time.Duration {
 	log := logf.FromContext(ctx)
 
-	// メンテナンスモードの場合は電源OFF操作を行わない
-	if m.Spec.Maintenance != nil && m.Spec.Maintenance.Enabled {
-		log.Info("machine is in maintenance mode, skipping power down", "machine", m.Name)
-		conditions.SetCondition(&m.Status.Conditions, conditions.TypeMaintenance, metav1.ConditionTrue, conditions.ReasonMaintenance, "Machine is under maintenance")
+	// Quarantine 中のマシンは原因調査・デバッグのため電源状態を維持 (PreservePower)
+	if m.Status.Quarantine != nil {
+		log.Info("machine is quarantined, preserving power state for inspection", "machine", m.Name, "reason", m.Status.Quarantine.Reason)
 		return 1 * time.Minute
 	}
 
@@ -491,15 +577,35 @@ func (r *RunnerMachineReconciler) reconcileOff(
 			}
 		}
 
-		// 3.2 このNode上で現在実行中のRunner Podが存在するか確認
-		activePodCount := r.countActiveRunnerPodsOnNode(ctx, cluster, m.Spec.KubernetesNodeName)
+		// 3.2 このNode上で現在実行中のRunner Podが存在するか確認 (Fail closed)
+		activePodCount, countErr := r.countActiveRunnerPodsOnNode(ctx, cluster, m.Spec.KubernetesNodeName)
+		if countErr != nil {
+			log.Error(countErr, "failed to count active runner pods on node, retrying safely", "machine", m.Name)
+			return 5 * time.Second
+		}
 		if activePodCount > 0 {
+			drainTimeout := 1 * time.Hour
+			if drainStartedAt != nil && time.Since(drainStartedAt.Time) > drainTimeout {
+				log.Info("drain timed out with active runner pods; blocking scale-down power off to protect running jobs", "machine", m.Name, "activePods", activePodCount, "timeout", drainTimeout)
+				conditions.SetCondition(&m.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, "DrainTimedOut", fmt.Sprintf("Drain timed out after %s with %d active pods; scale-down power off blocked", drainTimeout, activePodCount))
+				return 30 * time.Second
+			}
 			log.Info("machine has active runner pods, waiting for drain", "machine", m.Name, "activePods", activePodCount)
 			conditions.SetCondition(&m.Status.Conditions, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonDraining, fmt.Sprintf("Waiting for %d runner pods to finish", activePodCount))
 			return 5 * time.Second
 		}
 
-		// 3.3 ScaleDownDelayの確認
+		// 3.3 Cordon 後の Quiescence window (スケジューラの in-flight bind 完了待機)
+		if drainStartedAt != nil {
+			quiescenceWindow := 10 * time.Second
+			drainElapsed := time.Since(drainStartedAt.Time)
+			if drainElapsed < quiescenceWindow {
+				log.Info("waiting for cordon quiescence window before shutting down", "machine", m.Name, "elapsed", drainElapsed)
+				return 5 * time.Second
+			}
+		}
+
+		// 3.4 ScaleDownDelayの確認
 		scaleDownDelay := 10 * time.Minute
 		if nodePool != nil && nodePool.Spec.Scaling.ScaleDownDelay != nil && nodePool.Spec.Scaling.ScaleDownDelay.Duration > 0 {
 			scaleDownDelay = nodePool.Spec.Scaling.ScaleDownDelay.Duration
@@ -514,14 +620,14 @@ func (r *RunnerMachineReconciler) reconcileOff(
 			}
 		}
 
-		// 3.4 30秒以内の重複GracefulShutdownを抑止
+		// 3.5 30秒以内の重複GracefulShutdownを抑止
 		if m.Status.Operation != nil && m.Status.Operation.Type == ghav1alpha1.PowerOperationTypeGracefulShutdown {
 			if time.Since(m.Status.Operation.LastAttemptAt.Time) < 30*time.Second {
 				return 10 * time.Second
 			}
 		}
 
-		// 3.5 GracefulShutdownの発行
+		// 3.6 GracefulShutdownの発行
 		r.initiateGracefulShutdown(ctx, m, pwrCtrl)
 		return 10 * time.Second
 	}
@@ -547,11 +653,29 @@ func (r *RunnerMachineReconciler) handleShutdownTimeout(
 		r.Recorder.Eventf(m, nil, corev1.EventTypeWarning, "ShutdownStalled", "PowerOff", "Graceful shutdown on machine %s exceeded timeout %s", m.Name, shutdownTimeout)
 	}
 	conditions.SetCondition(&m.Status.Conditions, conditions.TypePowerReady, metav1.ConditionFalse, conditions.ReasonShutdownStalled, "Graceful shutdown exceeded shutdown timeout")
+
+	// ForceOff は Drain完了が永続記録（DrainVerifiedAt != nil）されている場合のみ許可 (安全原則)
+	op := m.Status.Operation
+	if op == nil || op.DrainVerifiedAt == nil {
+		log.Info("blocking force off because Drain completion was not verified and recorded", "machine", m.Name)
+		return
+	}
+
 	if forceOffAfter > 0 && elapsed >= (shutdownTimeout+forceOffAfter) {
-		log.Info("force off timeout reached, initiating hard power cut", "machine", m.Name)
-		if r.Recorder != nil {
-			r.Recorder.Eventf(m, nil, corev1.EventTypeWarning, "ForceOff", "PowerOff", "Force off timeout reached, initiating hard power cut on machine %s", m.Name)
+		// 30秒以内の重複ForceOffを抑止
+		if op.Type == ghav1alpha1.PowerOperationTypeForceOff && time.Since(op.LastAttemptAt.Time) < 30*time.Second {
+			return
 		}
+
+		log.Info("force off timeout reached and drain was verified, initiating hard power cut", "machine", m.Name, "drainVerifiedAt", op.DrainVerifiedAt)
+		if r.Recorder != nil {
+			r.Recorder.Eventf(m, nil, corev1.EventTypeWarning, "ForceOff", "PowerOff", "Force off timeout reached with verified drain, initiating hard power cut on machine %s", m.Name)
+		}
+		nowOp := metav1.Now()
+		op.Type = ghav1alpha1.PowerOperationTypeForceOff
+		op.LastAttemptAt = nowOp
+		op.Attempts++
+
 		if pwrCtrl != nil {
 			if err := pwrCtrl.ForceOff(ctx); err != nil {
 				log.Error(err, "failed to force off machine", "machine", m.Name)
@@ -575,10 +699,11 @@ func (r *RunnerMachineReconciler) initiateGracefulShutdown(
 
 	nowOp := metav1.Now()
 	m.Status.Operation = &ghav1alpha1.PowerOperationStatus{
-		Type:          ghav1alpha1.PowerOperationTypeGracefulShutdown,
-		StartedAt:     nowOp,
-		LastAttemptAt: nowOp,
-		Attempts:      1,
+		Type:            ghav1alpha1.PowerOperationTypeGracefulShutdown,
+		StartedAt:       nowOp,
+		LastAttemptAt:   nowOp,
+		DrainVerifiedAt: &nowOp,
+		Attempts:        1,
 	}
 
 	if pwrCtrl != nil {
@@ -596,13 +721,13 @@ func (r *RunnerMachineReconciler) initiateGracefulShutdown(
 	}
 }
 
-func (r *RunnerMachineReconciler) countActiveRunnerPodsOnNode(ctx context.Context, cluster *ghav1alpha1.RunnerCluster, nodeName string) int {
+func (r *RunnerMachineReconciler) countActiveRunnerPodsOnNode(ctx context.Context, cluster *ghav1alpha1.RunnerCluster, nodeName string) (int, error) {
 	if !cluster.Status.APIReachable {
-		return 0
+		return 0, nil
 	}
 	remoteClient, err := r.RemoteProvider.GetClient(ctx, cluster)
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("failed to get client for remote cluster: %w", err)
 	}
 
 	runnerNs := cluster.Spec.RunnerNamespace
@@ -615,7 +740,7 @@ func (r *RunnerMachineReconciler) countActiveRunnerPodsOnNode(ctx context.Contex
 		runner.LabelManagedBy: runner.LabelManagedByValue,
 	})
 	if err := remoteClient.List(ctx, &podList, client.InNamespace(runnerNs), client.MatchingLabelsSelector{Selector: selector}); err != nil {
-		return 0
+		return 0, fmt.Errorf("failed to list runner pods on remote cluster: %w", err)
 	}
 
 	count := 0
@@ -624,7 +749,7 @@ func (r *RunnerMachineReconciler) countActiveRunnerPodsOnNode(ctx context.Contex
 			count++
 		}
 	}
-	return count
+	return count, nil
 }
 
 func (r *RunnerMachineReconciler) getDesiredState(ctx context.Context, m *ghav1alpha1.RunnerMachine) (ghav1alpha1.MachineDesiredState, *metav1.Time, *ghav1alpha1.RunnerNodePool, error) {
@@ -674,8 +799,17 @@ func (r *RunnerMachineReconciler) getRedfishController(ctx context.Context, m *g
 	return r.RedfishFactory.NewController(m.Spec.Redfish, username, password, caCert)
 }
 
-func (r *RunnerMachineReconciler) updateStatus(ctx context.Context, m, orig *ghav1alpha1.RunnerMachine) error {
-	return r.Status().Patch(ctx, m, client.MergeFrom(orig))
+func (r *RunnerMachineReconciler) updateStatus(ctx context.Context, m, _ *ghav1alpha1.RunnerMachine) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var current ghav1alpha1.RunnerMachine
+		if err := r.Get(ctx, client.ObjectKeyFromObject(m), &current); err != nil {
+			return err
+		}
+		orig := current.DeepCopy()
+		current.Status = m.Status
+		patch := client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{})
+		return r.Status().Patch(ctx, &current, patch)
+	})
 }
 
 func (r *RunnerMachineReconciler) recordRedfishFailure(machine *ghav1alpha1.RunnerMachine, now time.Time, err error) {
@@ -687,10 +821,20 @@ func (r *RunnerMachineReconciler) recordRedfishFailure(machine *ghav1alpha1.Runn
 	h.ConsecutiveFailures++
 	h.LastFailureTime = &failTime
 
-	// 連続3回失敗で回路を開く (1分間Backoff)
+	// 連続3回失敗で回路を開く (指数バックオフ: 1m -> 2m -> 5m)
 	if h.ConsecutiveFailures >= 3 {
 		h.Circuit = ghav1alpha1.RedfishCircuitOpen
-		nextProbe := metav1.NewTime(now.Add(1 * time.Minute))
+		b := wait.Backoff{
+			Duration: 1 * time.Minute,
+			Factor:   2.0,
+			Cap:      5 * time.Minute,
+			Steps:    int(h.ConsecutiveFailures - 2),
+		}
+		backoff := b.Duration
+		for i := 0; i < int(h.ConsecutiveFailures-3); i++ {
+			backoff = b.Step()
+		}
+		nextProbe := metav1.NewTime(now.Add(backoff))
 		h.NextProbeTime = &nextProbe
 	}
 

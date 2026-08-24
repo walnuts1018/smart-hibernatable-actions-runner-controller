@@ -86,6 +86,11 @@ func (r *RunnerScaleSet) ValidateCreate(_ context.Context, obj *RunnerScaleSet) 
 func (r *RunnerScaleSet) ValidateUpdate(_ context.Context, oldObj, newObj *RunnerScaleSet) (admission.Warnings, error) {
 	runnerscalesetlog.Info("validate update RunnerScaleSet", "name", newObj.Name)
 
+	// 削除中のオブジェクト更新（Finalizer 削除など）は検証をスキップして Finalizer デッドロックを防止
+	if newObj.DeletionTimestamp != nil {
+		return nil, nil
+	}
+
 	var allErrs field.ErrorList
 
 	// 不変フィールドの検証
@@ -134,116 +139,11 @@ func (r *RunnerScaleSet) ValidateDelete(_ context.Context, obj *RunnerScaleSet) 
 func (r *RunnerScaleSet) validateRunnerScaleSet() error {
 	var allErrs field.ErrorList
 
-	// GitHub ConfigURL検証
-	if r.Spec.GitHub.ConfigURL == "" {
-		allErrs = append(allErrs, field.Required(
-			field.NewPath("spec", "github", "configURL"),
-			"configURL must not be empty",
-		))
-	} else {
-		parsedURL, err := url.ParseRequestURI(r.Spec.GitHub.ConfigURL)
-		if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-			allErrs = append(allErrs, field.Invalid(
-				field.NewPath("spec", "github", "configURL"),
-				r.Spec.GitHub.ConfigURL,
-				"configURL must be a valid HTTP or HTTPS URL",
-			))
-		}
-	}
-
-	// GitHub ScaleSetName検証
-	if r.Spec.GitHub.ScaleSetName == "" {
-		allErrs = append(allErrs, field.Required(
-			field.NewPath("spec", "github", "scaleSetName"),
-			"scaleSetName must not be empty",
-		))
-	}
-
-	// CredentialsSecretRef検証
-	if r.Spec.GitHub.CredentialsSecretRef.Name == "" {
-		allErrs = append(allErrs, field.Required(
-			field.NewPath("spec", "github", "credentialsSecretRef", "name"),
-			"credentialsSecretRef name must not be empty",
-		))
-	}
-
-	// NodePoolRef検証
-	if r.Spec.NodePoolRef.Name == "" {
-		allErrs = append(allErrs, field.Required(
-			field.NewPath("spec", "nodePoolRef", "name"),
-			"nodePoolRef name must not be empty",
-		))
-	}
-
-	// Scaling検証
-	if r.Spec.Scaling.MinRunners < 0 {
-		allErrs = append(allErrs, field.Invalid(
-			field.NewPath("spec", "scaling", "minRunners"),
-			r.Spec.Scaling.MinRunners,
-			"minRunners must be greater than or equal to 0",
-		))
-	}
-
-	if r.Spec.Scaling.MaxRunners < 1 {
-		allErrs = append(allErrs, field.Invalid(
-			field.NewPath("spec", "scaling", "maxRunners"),
-			r.Spec.Scaling.MaxRunners,
-			"maxRunners must be greater than or equal to 1",
-		))
-	}
-
-	if r.Spec.Scaling.MinRunners > r.Spec.Scaling.MaxRunners {
-		allErrs = append(allErrs, field.Invalid(
-			field.NewPath("spec", "scaling", "minRunners"),
-			r.Spec.Scaling.MinRunners,
-			"minRunners must be less than or equal to maxRunners",
-		))
-	}
-
-	// Runner Template検証
-	containers := r.Spec.Runner.Template.Spec.Containers
-	if len(containers) == 0 {
-		allErrs = append(allErrs, field.Required(
-			field.NewPath("spec", "runner", "template", "spec", "containers"),
-			"at least one container must be defined in runner pod template",
-		))
-	} else {
-		targetName := r.Spec.Runner.ContainerName
-		if targetName == "" {
-			targetName = "runner"
-		}
-		found := false
-		for ci, c := range containers {
-			if c.Name == targetName {
-				found = true
-			}
-			for ei, ev := range c.Env {
-				if ev.Name == "ACTIONS_RUNNER_INPUT_JITCONFIG" {
-					allErrs = append(allErrs, field.Forbidden(
-						field.NewPath("spec", "runner", "template", "spec", "containers").Index(ci).Child("env").Index(ei),
-						"ACTIONS_RUNNER_INPUT_JITCONFIG is a reserved environment variable managed by SHARC",
-					))
-				}
-			}
-		}
-		if !found {
-			allErrs = append(allErrs, field.Invalid(
-				field.NewPath("spec", "runner", "containerName"),
-				r.Spec.Runner.ContainerName,
-				fmt.Sprintf("container %q not found in pod template containers", targetName),
-			))
-		}
-	}
-
-	// 予約ラベル・アノテーションの検証
-	for k := range r.Spec.Runner.Template.Labels {
-		if k == "gha.walnuts.dev/managed-by" || k == "gha.walnuts.dev/scaleset-uid" || k == "gha.walnuts.dev/scaleset-name" || k == "gha.walnuts.dev/runner-uid" || k == "gha.walnuts.dev/runner-name" {
-			allErrs = append(allErrs, field.Forbidden(
-				field.NewPath("spec", "runner", "template", "metadata", "labels").Key(k),
-				fmt.Sprintf("label %q is reserved and managed by SHARC", k),
-			))
-		}
-	}
+	r.validateGitHubSpec(&allErrs)
+	r.validateScalingSpec(&allErrs)
+	r.validateRunnerTemplateSpec(&allErrs)
+	r.validateSecurityPolicy(&allErrs)
+	r.validateReservedLabels(&allErrs)
 
 	if len(allErrs) == 0 {
 		return nil
@@ -254,4 +154,163 @@ func (r *RunnerScaleSet) validateRunnerScaleSet() error {
 		r.Name,
 		allErrs,
 	)
+}
+
+func (r *RunnerScaleSet) validateGitHubSpec(allErrs *field.ErrorList) {
+	if r.Spec.GitHub.ConfigURL == "" {
+		*allErrs = append(*allErrs, field.Required(
+			field.NewPath("spec", "github", "configURL"),
+			"configURL must not be empty",
+		))
+	} else {
+		parsedURL, err := url.ParseRequestURI(r.Spec.GitHub.ConfigURL)
+		if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+			*allErrs = append(*allErrs, field.Invalid(
+				field.NewPath("spec", "github", "configURL"),
+				r.Spec.GitHub.ConfigURL,
+				"configURL must be a valid HTTP or HTTPS URL",
+			))
+		}
+	}
+
+	if r.Spec.GitHub.ScaleSetName == "" {
+		*allErrs = append(*allErrs, field.Required(
+			field.NewPath("spec", "github", "scaleSetName"),
+			"scaleSetName must not be empty",
+		))
+	}
+
+	if r.Spec.GitHub.CredentialsSecretRef.Name == "" {
+		*allErrs = append(*allErrs, field.Required(
+			field.NewPath("spec", "github", "credentialsSecretRef", "name"),
+			"credentialsSecretRef name must not be empty",
+		))
+	}
+
+	if r.Spec.NodePoolRef.Name == "" {
+		*allErrs = append(*allErrs, field.Required(
+			field.NewPath("spec", "nodePoolRef", "name"),
+			"nodePoolRef name must not be empty",
+		))
+	}
+}
+
+func (r *RunnerScaleSet) validateScalingSpec(allErrs *field.ErrorList) {
+	if r.Spec.Scaling.MinRunners < 0 {
+		*allErrs = append(*allErrs, field.Invalid(
+			field.NewPath("spec", "scaling", "minRunners"),
+			r.Spec.Scaling.MinRunners,
+			"minRunners must be greater than or equal to 0",
+		))
+	}
+
+	if r.Spec.Scaling.MaxRunners < 1 {
+		*allErrs = append(*allErrs, field.Invalid(
+			field.NewPath("spec", "scaling", "maxRunners"),
+			r.Spec.Scaling.MaxRunners,
+			"maxRunners must be greater than or equal to 1",
+		))
+	}
+
+	if r.Spec.Scaling.MinRunners > r.Spec.Scaling.MaxRunners {
+		*allErrs = append(*allErrs, field.Invalid(
+			field.NewPath("spec", "scaling", "minRunners"),
+			r.Spec.Scaling.MinRunners,
+			"minRunners must be less than or equal to maxRunners",
+		))
+	}
+}
+
+func (r *RunnerScaleSet) validateRunnerTemplateSpec(allErrs *field.ErrorList) {
+	containers := r.Spec.Runner.Template.Spec.Containers
+	if len(containers) == 0 {
+		*allErrs = append(*allErrs, field.Required(
+			field.NewPath("spec", "runner", "template", "spec", "containers"),
+			"at least one container must be defined in runner pod template",
+		))
+		return
+	}
+
+	targetName := r.Spec.Runner.ContainerName
+	if targetName == "" {
+		targetName = "runner"
+	}
+	found := false
+	for ci, c := range containers {
+		if c.Name == targetName {
+			found = true
+		}
+		for ei, ev := range c.Env {
+			if ev.Name == "ACTIONS_RUNNER_INPUT_JITCONFIG" {
+				*allErrs = append(*allErrs, field.Forbidden(
+					field.NewPath("spec", "runner", "template", "spec", "containers").Index(ci).Child("env").Index(ei),
+					"ACTIONS_RUNNER_INPUT_JITCONFIG is a reserved environment variable managed by SHARC",
+				))
+			}
+		}
+	}
+	if !found {
+		*allErrs = append(*allErrs, field.Invalid(
+			field.NewPath("spec", "runner", "containerName"),
+			r.Spec.Runner.ContainerName,
+			fmt.Sprintf("container %q not found in pod template containers", targetName),
+		))
+	}
+}
+
+func (r *RunnerScaleSet) validateSecurityPolicy(allErrs *field.ErrorList) {
+	podSpec := r.Spec.Runner.Template.Spec
+	if podSpec.HostNetwork {
+		*allErrs = append(*allErrs, field.Forbidden(
+			field.NewPath("spec", "runner", "template", "spec", "hostNetwork"),
+			"hostNetwork is forbidden for ephemeral runner pods",
+		))
+	}
+	if podSpec.HostPID {
+		*allErrs = append(*allErrs, field.Forbidden(
+			field.NewPath("spec", "runner", "template", "spec", "hostPID"),
+			"hostPID is forbidden for ephemeral runner pods",
+		))
+	}
+	if podSpec.HostIPC {
+		*allErrs = append(*allErrs, field.Forbidden(
+			field.NewPath("spec", "runner", "template", "spec", "hostIPC"),
+			"hostIPC is forbidden for ephemeral runner pods",
+		))
+	}
+	for ci, c := range podSpec.Containers {
+		if c.SecurityContext != nil && c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged {
+			*allErrs = append(*allErrs, field.Forbidden(
+				field.NewPath("spec", "runner", "template", "spec", "containers").Index(ci).Child("securityContext", "privileged"),
+				"privileged containers are forbidden for ephemeral runner pods",
+			))
+		}
+	}
+	for ci, c := range podSpec.InitContainers {
+		if c.SecurityContext != nil && c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged {
+			*allErrs = append(*allErrs, field.Forbidden(
+				field.NewPath("spec", "runner", "template", "spec", "initContainers").Index(ci).Child("securityContext", "privileged"),
+				"privileged containers are forbidden for ephemeral runner pods",
+			))
+		}
+	}
+	for vi, v := range podSpec.Volumes {
+		if v.HostPath != nil {
+			*allErrs = append(*allErrs, field.Forbidden(
+				field.NewPath("spec", "runner", "template", "spec", "volumes").Index(vi).Child("hostPath"),
+				"hostPath volumes are forbidden for ephemeral runner pods; use emptyDir or dedicated storage",
+			))
+		}
+	}
+}
+
+func (r *RunnerScaleSet) validateReservedLabels(allErrs *field.ErrorList) {
+	for k := range r.Spec.Runner.Template.Labels {
+		if k == "gha.walnuts.dev/managed-by" || k == "gha.walnuts.dev/scaleset-uid" || k == "gha.walnuts.dev/scaleset-name" || k == "gha.walnuts.dev/runner-uid" || k == "gha.walnuts.dev/runner-name" {
+			*allErrs = append(*allErrs, field.Forbidden(
+				field.NewPath("spec", "runner", "template", "metadata", "labels").Key(k),
+				fmt.Sprintf("label %q is reserved and managed by SHARC", k),
+			))
+		}
+	}
 }

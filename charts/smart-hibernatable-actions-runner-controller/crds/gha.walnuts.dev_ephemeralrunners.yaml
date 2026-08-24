@@ -172,6 +172,11 @@ spec:
                   terminal state (Completed or Failed).
                 format: date-time
                 type: string
+              gcEligibleAt:
+                description: GCEligibleAt is the timestamp after which this EphemeralRunner
+                  CR can be garbage collected.
+                format: date-time
+                type: string
               github:
                 description: GitHub holds IDs and job details from GitHub Actions.
                 properties:
@@ -201,6 +206,11 @@ spec:
                       GitHub Actions.
                     format: int64
                     type: integer
+                  startedObservedAt:
+                    description: StartedObservedAt records the timestamp when the
+                      JobStarted event was observed from GitHub Actions.
+                    format: date-time
+                    type: string
                 type: object
               phase:
                 default: Pending
@@ -221,6 +231,11 @@ spec:
                 description: Provisioning records details of the active or latest
                   JIT provisioning attempt.
                 properties:
+                  failures:
+                    description: Failures is the count of consecutive failed JIT provisioning
+                      attempts.
+                    format: int32
+                    type: integer
                   id:
                     description: ID is the unique attempt identifier (e.g. short hash
                       or sequential counter).
@@ -228,6 +243,11 @@ spec:
                   jitGeneratedAt:
                     description: JITGeneratedAt is the timestamp when JIT config was
                       generated.
+                    format: date-time
+                    type: string
+                  nextRetryAt:
+                    description: NextRetryAt is the timestamp when the next JIT provisioning
+                      attempt is allowed.
                     format: date-time
                     type: string
                   runnerID:

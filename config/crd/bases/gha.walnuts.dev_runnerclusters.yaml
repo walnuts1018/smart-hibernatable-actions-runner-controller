@@ -57,6 +57,20 @@ spec:
           spec:
             description: spec defines the desired state of RunnerCluster
             properties:
+              identity:
+                description: Identity defines identity and adoption expectations for
+                  the cluster.
+                properties:
+                  adoptionGeneration:
+                    description: AdoptionGeneration is an incrementing counter to
+                      trigger adoption of ExpectedUID.
+                    format: int64
+                    type: integer
+                  expectedUID:
+                    description: ExpectedUID is the new kube-system namespace UID
+                      expected when re-adopting a re-provisioned cluster.
+                    type: string
+                type: object
               kubeconfigSecretRef:
                 description: KubeconfigSecretRef references the Secret containing
                   the kubeconfig to connect to the runner Kubernetes cluster.
@@ -180,6 +194,11 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              observedAdoptionGeneration:
+                description: ObservedAdoptionGeneration records the last successfully
+                  processed AdoptionGeneration.
+                format: int64
+                type: integer
               phase:
                 default: Unknown
                 description: Phase is the current high-level state of the runner cluster.

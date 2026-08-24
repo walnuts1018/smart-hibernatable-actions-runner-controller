@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/events"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -84,7 +85,7 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// 3. このNodePoolを参照するRunnerScaleSet一覧を取得し、需要を集約
-	_, totalRequiredCapacity, err := r.aggregateDemand(ctx, &nodePool)
+	referencingScaleSets, allocInputs, activeRunnersByNode, totalRequiredCapacity, err := r.aggregateDemand(ctx, &nodePool)
 	if err != nil {
 		log.Error(err, "failed to aggregate demand for nodepool")
 		if updateErr := r.updateStatus(ctx, &nodePool, origNodePool); updateErr != nil {
@@ -95,8 +96,17 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	nodePool.Status.DesiredRunnerCapacity = totalRequiredCapacity
 
-	// 4. 各MachineのStatusを集計
-	machineCapacities, poweredOnCount, readyNodesCount, readyCapacity := r.collectMachineCapacities(machineList.Items)
+	// 4. 各MachineのStatusを集計 (前回のDesiredMachinesからPreviouslyDesiredマップを作成)
+	prevDesiredMap := make(map[string]bool)
+	for _, dm := range nodePool.Status.DesiredMachines {
+		if dm.DesiredState == ghav1alpha1.MachineDesiredStateActive {
+			prevDesiredMap[dm.Name] = true
+			if dm.UID != "" {
+				prevDesiredMap[dm.UID] = true
+			}
+		}
+	}
+	machineCapacities, poweredOnCount, readyNodesCount, readyCapacity := r.collectMachineCapacities(machineList.Items, prevDesiredMap, activeRunnersByNode)
 
 	nodePool.Status.PoweredOnNodes = poweredOnCount
 	nodePool.Status.ReadyNodes = readyNodesCount
@@ -132,7 +142,11 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// 6. DesiredMachines計画をStatusに反映
 	r.updateDesiredMachinesPlan(&nodePool, plan, machineList.Items, totalRequiredCapacity)
 
-	// 7. Status condition更新
+	// 7. 各ScaleSetのEffectiveMaxRunnersをFair-share配分
+	maxAssignableCapacity := max(readyCapacity, int32(plan.TotalCapacity))
+	r.syncScaleSetAllocations(ctx, referencingScaleSets, allocInputs, maxAssignableCapacity)
+
+	// 8. Status condition更新
 	if nodePool.Status.ReadyNodes >= nodePool.Status.DesiredNodes && nodePool.Status.DesiredNodes > 0 {
 		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeReady, metav1.ConditionTrue, conditions.ReasonReady, "NodePool is ready")
 		conditions.SetCondition(&nodePool.Status.Conditions, conditions.TypeCapacityReady, metav1.ConditionTrue, conditions.ReasonCapacitySufficient, "Sufficient runner capacity available")
@@ -154,11 +168,22 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	metrics.PoweredOnNodes.WithLabelValues(nodePool.Namespace, nodePool.Name).Set(float64(nodePool.Status.PoweredOnNodes))
 	metrics.ReadyNodes.WithLabelValues(nodePool.Namespace, nodePool.Name).Set(float64(nodePool.Status.ReadyNodes))
 
+	committedCapacity := int32(plan.TotalCapacity)
+	metrics.CapacityDemand.WithLabelValues(nodePool.Namespace, nodePool.Name).Set(float64(totalRequiredCapacity))
+	metrics.CapacityCommitted.WithLabelValues(nodePool.Namespace, nodePool.Name).Set(float64(committedCapacity))
+	metrics.CapacityReady.WithLabelValues(nodePool.Namespace, nodePool.Name).Set(float64(readyCapacity))
+
 	deficit := float64(totalRequiredCapacity - readyCapacity)
 	if deficit < 0 {
 		deficit = 0
 	}
 	metrics.CapacityDeficit.WithLabelValues(nodePool.Namespace, nodePool.Name).Set(deficit)
+
+	uncommittedDeficit := float64(totalRequiredCapacity - committedCapacity)
+	if uncommittedDeficit < 0 {
+		uncommittedDeficit = 0
+	}
+	metrics.UncommittedDeficit.WithLabelValues(nodePool.Namespace, nodePool.Name).Set(uncommittedDeficit)
 
 	// Requeue
 	requeueAfter := 30 * time.Second
@@ -171,22 +196,33 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
-func (r *RunnerNodePoolReconciler) updateStatus(ctx context.Context, np, orig *ghav1alpha1.RunnerNodePool) error {
-	return r.Status().Patch(ctx, np, client.MergeFrom(orig))
+func (r *RunnerNodePoolReconciler) updateStatus(ctx context.Context, np, _ *ghav1alpha1.RunnerNodePool) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var current ghav1alpha1.RunnerNodePool
+		if err := r.Get(ctx, client.ObjectKeyFromObject(np), &current); err != nil {
+			return err
+		}
+		orig := current.DeepCopy()
+		current.Status = np.Status
+		patch := client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{})
+		return r.Status().Patch(ctx, &current, patch)
+	})
 }
 
-func (r *RunnerNodePoolReconciler) aggregateDemand(ctx context.Context, nodePool *ghav1alpha1.RunnerNodePool) ([]*ghav1alpha1.RunnerScaleSet, int32, error) {
+func (r *RunnerNodePoolReconciler) aggregateDemand(ctx context.Context, nodePool *ghav1alpha1.RunnerNodePool) ([]*ghav1alpha1.RunnerScaleSet, []capacity.ScaleSetAllocationInput, map[string]int, int32, error) {
 	var scaleSetList ghav1alpha1.RunnerScaleSetList
 	if err := r.List(ctx, &scaleSetList, client.InNamespace(nodePool.Namespace), client.MatchingFields{
 		IndexNodePoolRefName: nodePool.Name,
 	}); err != nil {
 		if err := r.List(ctx, &scaleSetList, client.InNamespace(nodePool.Namespace)); err != nil {
-			return nil, 0, err
+			return nil, nil, nil, 0, err
 		}
 	}
 
 	var totalRequiredCapacity int32
 	var referencingScaleSets []*ghav1alpha1.RunnerScaleSet
+	var allocInputs []capacity.ScaleSetAllocationInput
+	activeRunnersByNode := make(map[string]int)
 
 	for i := range scaleSetList.Items {
 		ss := &scaleSetList.Items[i]
@@ -200,7 +236,7 @@ func (r *RunnerNodePoolReconciler) aggregateDemand(ctx context.Context, nodePool
 			IndexScaleSetRefName: ss.Name,
 		}); err != nil {
 			if err := r.List(ctx, &runnerList, client.InNamespace(nodePool.Namespace)); err != nil {
-				return nil, 0, err
+				return nil, nil, nil, 0, err
 			}
 		}
 
@@ -214,17 +250,50 @@ func (r *RunnerNodePoolReconciler) aggregateDemand(ctx context.Context, nodePool
 			}
 			if matches && isRunnerNonTerminal(run.Status.Phase) {
 				nonTerminalCount++
+				if run.Status.RemotePod.NodeName != "" {
+					activeRunnersByNode[run.Status.RemotePod.NodeName]++
+				}
 			}
 		}
 
 		required := max(nonTerminalCount, ss.Status.DesiredRunners)
 		totalRequiredCapacity += required
+
+		allocInputs = append(allocInputs, capacity.ScaleSetAllocationInput{
+			Name:          ss.Name,
+			HardCommitted: nonTerminalCount,
+			Max:           ss.Spec.Scaling.MaxRunners,
+		})
 	}
 
-	return referencingScaleSets, totalRequiredCapacity, nil
+	return referencingScaleSets, allocInputs, activeRunnersByNode, totalRequiredCapacity, nil
 }
 
-func (r *RunnerNodePoolReconciler) collectMachineCapacities(machines []ghav1alpha1.RunnerMachine) ([]capacity.MachineCapacity, int32, int32, int32) {
+func (r *RunnerNodePoolReconciler) syncScaleSetAllocations(ctx context.Context, scaleSets []*ghav1alpha1.RunnerScaleSet, allocInputs []capacity.ScaleSetAllocationInput, totalCapacity int32) {
+	log := logf.FromContext(ctx)
+	allocations := capacity.AllocateScaleSetCapacity(totalCapacity, allocInputs)
+	for _, ss := range scaleSets {
+		allocated, ok := allocations[ss.Name]
+		if !ok {
+			continue
+		}
+		if ss.Status.EffectiveMaxRunners != allocated {
+			log.Info("updating EffectiveMaxRunners for RunnerScaleSet", "scaleSet", ss.Name, "oldMax", ss.Status.EffectiveMaxRunners, "newMax", allocated)
+			_ = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				var current ghav1alpha1.RunnerScaleSet
+				if err := r.Get(ctx, client.ObjectKeyFromObject(ss), &current); err != nil {
+					return err
+				}
+				orig := current.DeepCopy()
+				current.Status.EffectiveMaxRunners = allocated
+				patch := client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{})
+				return r.Status().Patch(ctx, &current, patch)
+			})
+		}
+	}
+}
+
+func (r *RunnerNodePoolReconciler) collectMachineCapacities(machines []ghav1alpha1.RunnerMachine, prevDesiredMap map[string]bool, activeRunnersByNode map[string]int) ([]capacity.MachineCapacity, int32, int32, int32) {
 	machineCapacities := make([]capacity.MachineCapacity, 0, len(machines))
 	var (
 		poweredOnCount  int32
@@ -238,6 +307,8 @@ func (r *RunnerNodePoolReconciler) collectMachineCapacities(machines []ghav1alph
 		isReady := m.Status.Kubernetes.Ready && isPoweredOn
 		isQuarantined := m.Status.Quarantine != nil
 		isMaintenance := m.Spec.Maintenance != nil && m.Spec.Maintenance.Enabled
+		wasDesired := prevDesiredMap[m.Name] || (m.UID != "" && prevDesiredMap[string(m.UID)])
+		activeCount := activeRunnersByNode[m.Spec.KubernetesNodeName]
 
 		if isPoweredOn && !isQuarantined && !isMaintenance {
 			poweredOnCount++
@@ -248,15 +319,17 @@ func (r *RunnerNodePoolReconciler) collectMachineCapacities(machines []ghav1alph
 		}
 
 		machineCapacities = append(machineCapacities, capacity.MachineCapacity{
-			Machine:         m,
-			Capacity:        int(m.Spec.Capacity.Runners),
-			Priority:        m.Spec.Priority,
-			Bootstrap:       m.Spec.Bootstrap,
-			PoweredOn:       isPoweredOn,
-			Ready:           m.Status.Kubernetes.Ready,
-			PowerManageable: true,
-			Quarantined:     isQuarantined,
-			Maintenance:     isMaintenance,
+			Machine:           m,
+			Capacity:          int(m.Spec.Capacity.Runners),
+			Priority:          m.Spec.Priority,
+			Bootstrap:         m.Spec.Bootstrap,
+			PoweredOn:         isPoweredOn,
+			Ready:             m.Status.Kubernetes.Ready,
+			PowerManageable:   true,
+			Quarantined:       isQuarantined,
+			Maintenance:       isMaintenance,
+			PreviouslyDesired: wasDesired,
+			ActiveRunners:     activeCount,
 		})
 	}
 

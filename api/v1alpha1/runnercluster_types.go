@@ -48,6 +48,17 @@ type RunnerClusterReadinessSpec struct {
 	NodeReadyTimeout *metav1.Duration `json:"nodeReadyTimeout,omitempty"`
 }
 
+// RunnerClusterIdentitySpec defines identity binding expectations for cluster re-provisioning and adoption.
+type RunnerClusterIdentitySpec struct {
+	// ExpectedUID is the new kube-system namespace UID expected when re-adopting a re-provisioned cluster.
+	// +optional
+	ExpectedUID string `json:"expectedUID,omitempty"`
+
+	// AdoptionGeneration is an incrementing counter to trigger adoption of ExpectedUID.
+	// +optional
+	AdoptionGeneration int64 `json:"adoptionGeneration,omitempty"`
+}
+
 // RunnerClusterSpec defines the desired state of RunnerCluster.
 type RunnerClusterSpec struct {
 	// KubeconfigSecretRef references the Secret containing the kubeconfig to connect to the runner Kubernetes cluster.
@@ -63,6 +74,10 @@ type RunnerClusterSpec struct {
 	// Readiness defines timeouts and parameters for checking cluster readiness.
 	// +optional
 	Readiness RunnerClusterReadinessSpec `json:"readiness,omitempty"`
+
+	// Identity defines identity and adoption expectations for the cluster.
+	// +optional
+	Identity *RunnerClusterIdentitySpec `json:"identity,omitempty"`
 }
 
 // RunnerClusterStatus defines the observed state of RunnerCluster.
@@ -79,6 +94,10 @@ type RunnerClusterStatus struct {
 	// ClusterUID is the unique identifier (kube-system namespace UID) of the remote cluster for split-brain protection.
 	// +optional
 	ClusterUID string `json:"clusterUID,omitempty"`
+
+	// ObservedAdoptionGeneration records the last successfully processed AdoptionGeneration.
+	// +optional
+	ObservedAdoptionGeneration int64 `json:"observedAdoptionGeneration,omitempty"`
 
 	// Conditions store the detailed status conditions of the runner cluster.
 	// +listType=map
