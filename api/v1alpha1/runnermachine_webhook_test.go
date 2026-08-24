@@ -29,9 +29,9 @@ func TestRunnerMachineDefaulting(t *testing.T) {
 		Name:      "test-machine",
 		Namespace: "default",
 		Spec: RunnerMachineSpec{
-			ClusterRef:         corev1.LocalObjectReference{Name: "test-cluster"},
-			NodeName: "node-1",
-			Capacity:           RunnerMachineCapacity{RunnerSlots: 4},
+			ClusterRef: corev1.LocalObjectReference{Name: "test-cluster"},
+			NodeName:   "node-1",
+			Capacity:   RunnerMachineCapacity{RunnerSlots: 4},
 			Redfish: RedfishSpec{
 				Endpoint:             "https://192.168.1.100",
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
@@ -111,9 +111,9 @@ func TestRunnerMachineValidateCreate(t *testing.T) {
 				Name:      "test-machine",
 				Namespace: "default",
 				Spec: RunnerMachineSpec{
-					ClusterRef:         corev1.LocalObjectReference{Name: "test-cluster"},
-					NodeName: "node-1",
-					Capacity:           RunnerMachineCapacity{RunnerSlots: 4},
+					ClusterRef: corev1.LocalObjectReference{Name: "test-cluster"},
+					NodeName:   "node-1",
+					Capacity:   RunnerMachineCapacity{RunnerSlots: 4},
 					Redfish: RedfishSpec{
 						Endpoint:             "https://192.168.1.100",
 						CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
@@ -135,9 +135,9 @@ func TestRunnerMachineValidateUpdate(t *testing.T) {
 		Name:      "test-machine",
 		Namespace: "default",
 		Spec: RunnerMachineSpec{
-			ClusterRef:         corev1.LocalObjectReference{Name: "test-cluster"},
-			NodeName: "node-1",
-			Capacity:           RunnerMachineCapacity{RunnerSlots: 4},
+			ClusterRef: corev1.LocalObjectReference{Name: "test-cluster"},
+			NodeName:   "node-1",
+			Capacity:   RunnerMachineCapacity{RunnerSlots: 4},
 			Redfish: RedfishSpec{
 				Endpoint:             "https://192.168.1.100",
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
