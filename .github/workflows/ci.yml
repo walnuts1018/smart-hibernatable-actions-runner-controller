@@ -42,14 +42,6 @@ jobs:
           mise run generate
           go mod tidy
 
-      - name: Build custom golangci-lint
-        run: |
-          if [ ! -x bin/custom-gcl ]; then
-            mise run build-golangci-lint
-          fi
-          ln -sf custom-gcl bin/golangci-lint
-          echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
-
       - parallel:
           - name: Validate workflows and shell scripts
             run: mise run lint:shell
