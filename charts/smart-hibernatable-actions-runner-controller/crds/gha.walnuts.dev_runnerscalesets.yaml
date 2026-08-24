@@ -8846,9 +8846,19 @@ spec:
                 description: GitHub holds statistics received directly from the GitHub
                   Actions message session.
                 properties:
+                  acquiredJobs:
+                    description: AcquiredJobs is the count of jobs acquired by this
+                      scale set.
+                    format: int32
+                    type: integer
                   assignedJobs:
                     description: AssignedJobs is the count of jobs currently assigned
                       to this scale set.
+                    format: int32
+                    type: integer
+                  availableJobs:
+                    description: AvailableJobs is the count of jobs currently available
+                      in the queue for this scale set.
                     format: int32
                     type: integer
                   busyRunners:

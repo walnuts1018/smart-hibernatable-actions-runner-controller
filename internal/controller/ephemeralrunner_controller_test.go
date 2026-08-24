@@ -18,6 +18,35 @@ import (
 	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/runner"
 )
 
+const validTestRSAPrivateKeyPEM = `-----BEGIN PRIVATE KEY-----
+MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQC11udPh2QLYPFH
+QOvdv7G6yxfheEbBTcj2FsgfqaJGpBb8TlEe0nD3GHe4TJKxdOUbDtOQpbBqFIpX
+PVrYUuvFEWlvSvabwWrYbbTnW7yg+YO5HUf4rMmyGt8ZtPvvuymZzBOPk+yfx6Ld
+iBIUEuqa1bxk7gahcx+zlxfPqg471Q7zo0BqUy1IgBP2QqPnWZFlP94fg3xbbrGa
+LZj1OiAVIZmQu2QaTP75vye/XrTGDD5UtQRg/d/LcAv7iddP68KbT3o0xlryjjzp
+n15YqAib0YvWosAde+Z/O2pV6gpn6pvq2trDuC09++SysgWRA9g0IWLWY7X5R1/H
+AZDxyaNBAgMBAAECggEAO0yFyk2gtoU6qb3mLT5iO0QX2ZNbn5Y6PuZXBNxQ6zB/
+vm/bzG1cIXh9MkDmZbB1NkmzfKxLx4xDQQflJD6GXJG9DGop2clNip7cK8ai0OwN
+pMSDv/i5HbfdoYh/0EH84wbGKkBXHhQAbLX/D0TL9QpWkaN9zhC4+dwAC9ytH51i
+axShF6CHgydYxNZu/bf5XuNXXlY80LJ+Ud0rd1lXKFbz5fYxgs43RkFg9CWWqqDC
+rRweNs8evqzATOrD7REccX/QTUJjgXvRaGlVfiyJQHAUyD7vbY0IqgdWJRlTC3r9
+MwJri5QjK+UVdxWGcMdvO++su0mhrpSNnM6II4+68QKBgQDmJrvVtuCzbtAjlvGO
+jHQhwOYlysH3gcccwS/Y6RV0Y61DZm7v2s0kp85wtO73iuHnC2KwwXjgi42R0VFr
+gAWWkEJ8MddX9LwL62+/bnv2A/ajVWIdY1wUovHRdTx3W3qJWZ+684aC+nFRsgtz
+miBBsyfNPmGz2ZLYMC3mbS82FwKBgQDKQx384YUsI5VAk6W/fiw2+W+KmhEpKD2P
+t3VHD3zNBUb1wMTReZ8RORDHQ9qZiIEMU+zCRHfyMhd7PzexPYMRzavBPqYsrW5O
+Q93n8LZC1H9InWGCC2Elk3WgliGqkHZLCHGF5GrK5G49w1V7m/ms+4zD/HQT8evd
+9dY9+DggZwKBgQDYXhnAdUkR51+t1b4KMWkMQnkbll57/XnfQo9k8NvGq967upUY
+0S6DA29E7hSqi9qMh1ukqH6nOwtAxvQwiA642a5na8PzYJVY72IDKi9HvbolG6Q9
+1KdAj1+fdwP9gfbVIXjVHRScFi5qi2PQrlkc6vzEK51Wo3k13TWJp6P2yQKBgQCo
+eWF4K21fB8ChipqMOA+iNwEG5TAYJTGqDTk92JOuvo+N0mTeyzyI/wyPvmBOdNpx
+J1LVumxirADNIypDkyYi5TsEeye1nTx9KqCjOujGH/RpytXWmZ3wy7Q17/fY9/3g
+oAbXbRzbJY0CGzuP+6rrwJhPA3C40FEUkFpFQgWWTwKBgQCyqjpc74Kvc0TFrZ3d
+uOIW8u0YbaViHk0OV+qO1HjUXDFAESwOGJ8nu92Rf2rui4Wbw4JD4s4s9kofQh/e
+YbdWk16w6qaQF2QKr0hUHNyFy5027uabeQulxMRBxEt5kfoS9ul9CqSePkoH99WB
+83Az7XN4r9nFbKH6NdKHUw6GOQ==
+-----END PRIVATE KEY-----`
+
 func TestEphemeralRunnerReconciler_WaitingForCluster(t *testing.T) {
 	scheme := runtime.NewScheme()
 	clientgoscheme.AddToScheme(scheme)
@@ -46,7 +75,7 @@ func TestEphemeralRunnerReconciler_WaitingForCluster(t *testing.T) {
 		Data: map[string][]byte{
 			"github_app_id":              []byte("12345"),
 			"github_app_installation_id": []byte("67890"),
-			"github_app_private_key":     []byte("-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0fake\n-----END RSA PRIVATE KEY-----"),
+			"github_app_private_key":     []byte(validTestRSAPrivateKeyPEM),
 		},
 	}
 
@@ -136,7 +165,7 @@ func TestEphemeralRunnerReconciler_Provisioning(t *testing.T) {
 		Data: map[string][]byte{
 			"github_app_id":              []byte("12345"),
 			"github_app_installation_id": []byte("67890"),
-			"github_app_private_key":     []byte("-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0fake\n-----END RSA PRIVATE KEY-----"),
+			"github_app_private_key":     []byte(validTestRSAPrivateKeyPEM),
 		},
 	}
 
@@ -255,7 +284,7 @@ func TestEphemeralRunnerReconciler_OrphanRunnerRecovery(t *testing.T) {
 		Data: map[string][]byte{
 			"github_app_id":              []byte("12345"),
 			"github_app_installation_id": []byte("67890"),
-			"github_app_private_key":     []byte("-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0fake\n-----END RSA PRIVATE KEY-----"),
+			"github_app_private_key":     []byte(validTestRSAPrivateKeyPEM),
 		},
 	}
 
@@ -371,7 +400,7 @@ func TestEphemeralRunnerReconciler_IdempotentProvisioningWithExistingSecret(t *t
 		Data: map[string][]byte{
 			"github_app_id":              []byte("12345"),
 			"github_app_installation_id": []byte("67890"),
-			"github_app_private_key":     []byte("-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0fake\n-----END RSA PRIVATE KEY-----"),
+			"github_app_private_key":     []byte(validTestRSAPrivateKeyPEM),
 		},
 	}
 

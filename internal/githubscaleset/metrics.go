@@ -1,30 +1,60 @@
 package githubscaleset
 
 import (
-	"context"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sync"
 
 	"github.com/actions/scaleset"
 	"github.com/actions/scaleset/listener"
-	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/metrics"
 )
 
-type metricsRecorderImpl struct {
-	client    client.Client
-	namespace string
-	name      string
+// StatisticsStore provides thread-safe in-memory storage for the latest scale set statistics.
+type StatisticsStore struct {
+	mu     sync.RWMutex
+	latest *scaleset.RunnerScaleSetStatistic
 }
 
-// NewMetricsRecorder creates a listener.MetricsRecorder connected to Prometheus metrics and status updater.
-func NewMetricsRecorder(k8sClient client.Client, namespace, name string) listener.MetricsRecorder {
+// NewStatisticsStore creates a new thread-safe StatisticsStore.
+func NewStatisticsStore() *StatisticsStore {
+	return &StatisticsStore{}
+}
+
+// SetLatest stores a snapshot of the latest statistics.
+func (s *StatisticsStore) SetLatest(stat *scaleset.RunnerScaleSetStatistic) {
+	if stat == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	copied := *stat
+	s.latest = &copied
+}
+
+// GetLatest retrieves the latest statistics snapshot if available.
+func (s *StatisticsStore) GetLatest() *scaleset.RunnerScaleSetStatistic {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.latest == nil {
+		return nil
+	}
+	copied := *s.latest
+	return &copied
+}
+
+type metricsRecorderImpl struct {
+	namespace string
+	name      string
+	store     *StatisticsStore
+}
+
+var _ listener.MetricsRecorder = (*metricsRecorderImpl)(nil)
+
+// NewMetricsRecorder creates a listener.MetricsRecorder connected purely to Prometheus metrics and optional StatisticsStore.
+func NewMetricsRecorder(namespace, name string, store *StatisticsStore) listener.MetricsRecorder {
 	return &metricsRecorderImpl{
-		client:    k8sClient,
 		namespace: namespace,
 		name:      name,
+		store:     store,
 	}
 }
 
@@ -32,30 +62,17 @@ func (m *metricsRecorderImpl) RecordStatistics(statistics *scaleset.RunnerScaleS
 	if statistics == nil {
 		return
 	}
+
+	metrics.AvailableJobs.WithLabelValues(m.namespace, m.name).Set(float64(statistics.TotalAvailableJobs))
+	metrics.AcquiredJobs.WithLabelValues(m.namespace, m.name).Set(float64(statistics.TotalAcquiredJobs))
 	metrics.AssignedJobs.WithLabelValues(m.namespace, m.name).Set(float64(statistics.TotalAssignedJobs))
 	metrics.RunningJobs.WithLabelValues(m.namespace, m.name).Set(float64(statistics.TotalRunningJobs))
 	metrics.RegisteredRunners.WithLabelValues(m.namespace, m.name).Set(float64(statistics.TotalRegisteredRunners))
 	metrics.BusyRunners.WithLabelValues(m.namespace, m.name).Set(float64(statistics.TotalBusyRunners))
 	metrics.IdleRunners.WithLabelValues(m.namespace, m.name).Set(float64(statistics.TotalIdleRunners))
 
-	if m.client != nil {
-		ctx := context.Background()
-		var ss ghav1alpha1.RunnerScaleSet
-		if err := m.client.Get(ctx, client.ObjectKey{Namespace: m.namespace, Name: m.name}, &ss); err == nil {
-			orig := ss.DeepCopy()
-			ss.Status.GitHub.AssignedJobs = int32(statistics.TotalAssignedJobs)
-			ss.Status.GitHub.RunningJobs = int32(statistics.TotalRunningJobs)
-			ss.Status.GitHub.RegisteredRunners = int32(statistics.TotalRegisteredRunners)
-			ss.Status.GitHub.BusyRunners = int32(statistics.TotalBusyRunners)
-			ss.Status.GitHub.IdleRunners = int32(statistics.TotalIdleRunners)
-			now := metav1.Now()
-			ss.Status.GitHub.LastStatisticsTime = &now
-			ss.Status.Listener.LastPollTime = &now
-			ss.Status.Listener.Ready = true
-			if err := m.client.Status().Patch(ctx, &ss, client.MergeFrom(orig)); err != nil {
-				ctrl.Log.WithName("githubscaleset-metrics").Error(err, "failed to patch runner scale set status from statistics", "scaleSet", m.name)
-			}
-		}
+	if m.store != nil {
+		m.store.SetLatest(statistics)
 	}
 }
 
@@ -69,4 +86,18 @@ func (m *metricsRecorderImpl) RecordJobCompleted(_ *scaleset.JobCompleted) {
 
 func (m *metricsRecorderImpl) RecordDesiredRunners(count int) {
 	metrics.DesiredRunners.WithLabelValues(m.namespace, m.name).Set(float64(count))
+}
+
+// CleanupMetrics deletes Prometheus gauge series for the given scale set.
+func CleanupMetrics(namespace, name string) {
+	metrics.AvailableJobs.DeleteLabelValues(namespace, name)
+	metrics.AcquiredJobs.DeleteLabelValues(namespace, name)
+	metrics.AssignedJobs.DeleteLabelValues(namespace, name)
+	metrics.RunningJobs.DeleteLabelValues(namespace, name)
+	metrics.RegisteredRunners.DeleteLabelValues(namespace, name)
+	metrics.BusyRunners.DeleteLabelValues(namespace, name)
+	metrics.IdleRunners.DeleteLabelValues(namespace, name)
+	metrics.DesiredRunners.DeleteLabelValues(namespace, name)
+	metrics.ListenerSessionUp.DeleteLabelValues(namespace, name)
+	metrics.ListenerLastSuccessfulPoll.DeleteLabelValues(namespace, name)
 }

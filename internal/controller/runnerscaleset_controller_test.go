@@ -27,7 +27,7 @@ func TestRunnerScaleSetReconciler(t *testing.T) {
 		Data: map[string][]byte{
 			"github_app_id":              []byte("12345"),
 			"github_app_installation_id": []byte("67890"),
-			"github_app_private_key":     []byte("-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0fake\n-----END RSA PRIVATE KEY-----"),
+			"github_app_private_key":     []byte(validTestRSAPrivateKeyPEM),
 		},
 	}
 

@@ -104,6 +104,14 @@ type RunnerScaleSetSpec struct {
 
 // GitHubStatisticsStatus stores the latest runner statistics received from the GitHub Actions service.
 type GitHubStatisticsStatus struct {
+	// AvailableJobs is the count of jobs currently available in the queue for this scale set.
+	// +optional
+	AvailableJobs int32 `json:"availableJobs"`
+
+	// AcquiredJobs is the count of jobs acquired by this scale set.
+	// +optional
+	AcquiredJobs int32 `json:"acquiredJobs"`
+
 	// AssignedJobs is the count of jobs currently assigned to this scale set.
 	// +optional
 	AssignedJobs int32 `json:"assignedJobs"`

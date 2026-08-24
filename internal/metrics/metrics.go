@@ -11,6 +11,22 @@ const (
 )
 
 var (
+	// AvailableJobs measures the number of jobs currently available in the queue for the runner scale set.
+	AvailableJobs = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "gha_available_jobs",
+			Help: "Number of jobs currently available in the queue for the runner scale set.",
+		},
+		[]string{labelNamespace, labelName},
+	)
+	// AcquiredJobs measures the number of jobs acquired by the runner scale set.
+	AcquiredJobs = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "gha_acquired_jobs",
+			Help: "Number of jobs acquired by the runner scale set.",
+		},
+		[]string{labelNamespace, labelName},
+	)
 	// AssignedJobs measures the number of jobs currently assigned to the runner scale set.
 	AssignedJobs = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -229,6 +245,8 @@ var (
 
 func init() {
 	metrics.Registry.MustRegister(
+		AvailableJobs,
+		AcquiredJobs,
 		AssignedJobs,
 		RunningJobs,
 		RegisteredRunners,

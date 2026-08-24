@@ -6,7 +6,13 @@ import (
 	"os"
 	"time"
 
+	"github.com/actions/scaleset"
+	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
+	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/githubscaleset"
+	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/metrics"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -14,10 +20,6 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
-	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/githubscaleset"
-	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/metrics"
 )
 
 var runnerLogger = ctrl.Log.WithName("listener-runner")
@@ -113,6 +115,98 @@ func waitWithContext(ctx context.Context, d time.Duration) bool {
 	}
 }
 
+func updateListenerReadyStatus(ctx context.Context, k8sClient client.Client, namespace, name string, ready bool) {
+	if k8sClient == nil {
+		return
+	}
+	var ss ghav1alpha1.RunnerScaleSet
+	if err := k8sClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &ss); err != nil {
+		if !apierrors.IsNotFound(err) {
+			runnerLogger.Error(err, "failed to get RunnerScaleSet to update listener status", "scaleSet", name)
+		}
+		return
+	}
+	if ss.Status.Listener.Ready == ready && !ready {
+		return
+	}
+	orig := ss.DeepCopy()
+	ss.Status.Listener.Ready = ready
+	if ready {
+		now := metav1.Now()
+		ss.Status.Listener.LastConnectedTime = &now
+	}
+	if err := k8sClient.Status().Patch(ctx, &ss, client.MergeFrom(orig)); err != nil {
+		if !apierrors.IsNotFound(err) {
+			runnerLogger.Error(err, "failed to patch RunnerScaleSet listener ready status", "scaleSet", name, "ready", ready)
+		}
+	}
+}
+
+func syncStatisticsStatusLoop(ctx context.Context, k8sClient client.Client, namespace, name string, store *githubscaleset.StatisticsStore) {
+	if k8sClient == nil || store == nil {
+		return
+	}
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	var lastApplied *scaleset.RunnerScaleSetStatistic
+	lastPatchTime := time.Time{}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			current := store.GetLatest()
+			if current == nil {
+				continue
+			}
+
+			// 差分検知: 前回収集時と値が同じで、かつ直近30秒以内にPATCH済みならスキップ
+			isSame := lastApplied != nil &&
+				lastApplied.TotalAvailableJobs == current.TotalAvailableJobs &&
+				lastApplied.TotalAcquiredJobs == current.TotalAcquiredJobs &&
+				lastApplied.TotalAssignedJobs == current.TotalAssignedJobs &&
+				lastApplied.TotalRunningJobs == current.TotalRunningJobs &&
+				lastApplied.TotalRegisteredRunners == current.TotalRegisteredRunners &&
+				lastApplied.TotalBusyRunners == current.TotalBusyRunners &&
+				lastApplied.TotalIdleRunners == current.TotalIdleRunners
+
+			if isSame && time.Since(lastPatchTime) < 30*time.Second {
+				continue
+			}
+
+			var ss ghav1alpha1.RunnerScaleSet
+			if err := k8sClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &ss); err != nil {
+				if !apierrors.IsNotFound(err) {
+					runnerLogger.Error(err, "failed to get RunnerScaleSet to update statistics status", "scaleSet", name)
+				}
+				continue
+			}
+
+			orig := ss.DeepCopy()
+			ss.Status.GitHub.AvailableJobs = int32(current.TotalAvailableJobs)
+			ss.Status.GitHub.AcquiredJobs = int32(current.TotalAcquiredJobs)
+			ss.Status.GitHub.AssignedJobs = int32(current.TotalAssignedJobs)
+			ss.Status.GitHub.RunningJobs = int32(current.TotalRunningJobs)
+			ss.Status.GitHub.RegisteredRunners = int32(current.TotalRegisteredRunners)
+			ss.Status.GitHub.BusyRunners = int32(current.TotalBusyRunners)
+			ss.Status.GitHub.IdleRunners = int32(current.TotalIdleRunners)
+			now := metav1.Now()
+			ss.Status.GitHub.LastStatisticsTime = &now
+
+			if err := k8sClient.Status().Patch(ctx, &ss, client.MergeFrom(orig)); err != nil {
+				if !apierrors.IsNotFound(err) {
+					runnerLogger.Error(err, "failed to patch RunnerScaleSet GitHub statistics status", "scaleSet", name)
+				}
+			} else {
+				lastApplied = current
+				lastPatchTime = time.Now()
+			}
+		}
+	}
+}
+
 func runListenerSession(ctx context.Context, opts RunnerOptions, tracker *ReadinessTracker, owner string) {
 	attempt := 0
 	for {
@@ -183,8 +277,9 @@ func runListenerSession(ctx context.Context, opts RunnerOptions, tracker *Readin
 
 		tracker.SetGitHubAuthenticated(true)
 
+		statStore := githubscaleset.NewStatisticsStore()
 		scaler := NewScalerHandler(opts.K8sClient, opts.Namespace, opts.Name, tracker)
-		recorder := githubscaleset.NewMetricsRecorder(opts.K8sClient, opts.Namespace, opts.Name)
+		recorder := githubscaleset.NewMetricsRecorder(opts.Namespace, opts.Name, statStore)
 		maxCapacity := int(scaleSet.Status.EffectiveMaxRunners)
 		if scaleSet.Spec.Suspend {
 			maxCapacity = 0
@@ -203,8 +298,15 @@ func runListenerSession(ctx context.Context, opts RunnerOptions, tracker *Readin
 
 		tracker.SetSessionEstablished(true)
 
-		// バックグラウンドでRunnerScaleSetのStatus.EffectiveMaxRunnersを監視し、動的にSetMaxRunnersを呼び出す
 		sessionCtx, cancel := context.WithCancel(ctx)
+
+		// セッション確立時に Ready = true を反映
+		updateListenerReadyStatus(sessionCtx, opts.K8sClient, opts.Namespace, opts.Name, true)
+
+		// 非同期にGitHub統計のStatus反映ループを起動（coalesce/rate-limit）
+		go syncStatisticsStatusLoop(sessionCtx, opts.K8sClient, opts.Namespace, opts.Name, statStore)
+
+		// バックグラウンドでRunnerScaleSetのStatus.EffectiveMaxRunnersを監視し、動的にSetMaxRunnersを呼び出す
 		go func(currentMax int) {
 			ticker := time.NewTicker(5 * time.Second)
 			defer ticker.Stop()
@@ -241,6 +343,11 @@ func runListenerSession(ctx context.Context, opts RunnerOptions, tracker *Readin
 			runnerLogger.Error(closeErr, "failed to close listener message session cleanly")
 		}
 		closeCancel()
+
+		// セッション終了時に Ready = false を反映
+		statusCtx, statusCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		updateListenerReadyStatus(statusCtx, opts.K8sClient, opts.Namespace, opts.Name, false)
+		statusCancel()
 
 		metrics.ListenerSessionUp.WithLabelValues(opts.Namespace, opts.Name).Set(0)
 		if runErr != nil {
