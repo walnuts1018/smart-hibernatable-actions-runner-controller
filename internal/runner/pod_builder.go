@@ -40,8 +40,8 @@ func BuildRunnerPod(namespace string, scaleSet *ghav1alpha1.RunnerScaleSet, runn
 		},
 	}
 
-	injectDinD(scaleSet, podSpec)
-	injectMetrics(scaleSet, podSpec)
+	injectDinD(&scaleSet.Spec.Runner, podSpec)
+	injectMetrics(&scaleSet.Spec.Runner, podSpec)
 
 	containerFound := false
 	for i := range podSpec.Containers {
@@ -78,12 +78,12 @@ func BuildRunnerPod(namespace string, scaleSet *ghav1alpha1.RunnerScaleSet, runn
 	}
 }
 
-func injectMetrics(scaleSet *ghav1alpha1.RunnerScaleSet, podSpec *corev1.PodSpec) {
-	if scaleSet.Spec.Metrics == nil || !scaleSet.Spec.Metrics.Enabled {
+func injectMetrics(runnerSpec *ghav1alpha1.RunnerTemplateSpec, podSpec *corev1.PodSpec) {
+	if runnerSpec.Metrics == nil || !runnerSpec.Metrics.Enabled {
 		return
 	}
 
-	hookImage := scaleSet.Spec.Metrics.Image
+	hookImage := runnerSpec.Metrics.Image
 	if hookImage == "" {
 		hookImage = DefaultRunnerHookImage
 	}
@@ -166,15 +166,15 @@ func injectMetrics(scaleSet *ghav1alpha1.RunnerScaleSet, podSpec *corev1.PodSpec
 		},
 	}
 
-	if scaleSet.Spec.Metrics.Endpoint != "" {
+	if runnerSpec.Metrics.Endpoint != "" {
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  EnvRunnerMetricsEndpoint,
-			Value: scaleSet.Spec.Metrics.Endpoint,
+			Value: runnerSpec.Metrics.Endpoint,
 		})
 	}
 
-	if len(scaleSet.Spec.Metrics.ExtraAttributes) > 0 {
-		if raw, err := json.Marshal(scaleSet.Spec.Metrics.ExtraAttributes); err == nil {
+	if len(runnerSpec.Metrics.ExtraAttributes) > 0 {
+		if raw, err := json.Marshal(runnerSpec.Metrics.ExtraAttributes); err == nil {
 			envVars = append(envVars, corev1.EnvVar{
 				Name:  EnvRunnerMetricsExtraAttrs,
 				Value: string(raw),
@@ -213,17 +213,17 @@ func injectMetrics(scaleSet *ghav1alpha1.RunnerScaleSet, podSpec *corev1.PodSpec
 	}
 }
 
-func injectDinD(scaleSet *ghav1alpha1.RunnerScaleSet, podSpec *corev1.PodSpec) {
+func injectDinD(runnerSpec *ghav1alpha1.RunnerTemplateSpec, podSpec *corev1.PodSpec) {
 	// If ContainerMode is explicitly set to kubernetes, skip DinD injection.
-	if scaleSet.Spec.ContainerMode == ghav1alpha1.ContainerModeKubernetes {
+	if runnerSpec.ContainerMode == ghav1alpha1.ContainerModeKubernetes {
 		return
 	}
-	if scaleSet.Spec.DinD != nil && scaleSet.Spec.DinD.Enabled != nil && !*scaleSet.Spec.DinD.Enabled {
+	if runnerSpec.DinD != nil && runnerSpec.DinD.Enabled != nil && !*runnerSpec.DinD.Enabled {
 		return
 	}
 
 	runnerImage := getRunnerImage(podSpec)
-	dindContainer := buildDindContainer(scaleSet)
+	dindContainer := buildDindContainer(runnerSpec)
 
 	injectDindInitContainers(podSpec, runnerImage, dindContainer)
 	injectDindVolumes(podSpec)
@@ -242,7 +242,7 @@ func getRunnerImage(podSpec *corev1.PodSpec) string {
 	return DefaultActionsRunnerImage
 }
 
-func buildDindContainer(scaleSet *ghav1alpha1.RunnerScaleSet) corev1.Container {
+func buildDindContainer(runnerSpec *ghav1alpha1.RunnerTemplateSpec) corev1.Container {
 	dindImage := DefaultDindImage
 	groupGID := DefaultDindGroupGID
 	var dindRes corev1.ResourceRequirements
@@ -250,17 +250,17 @@ func buildDindContainer(scaleSet *ghav1alpha1.RunnerScaleSet) corev1.Container {
 	var dindEnv []corev1.EnvVar
 	var dindSecCtx *corev1.SecurityContext
 
-	if scaleSet.Spec.DinD != nil {
-		if scaleSet.Spec.DinD.Image != "" {
-			dindImage = scaleSet.Spec.DinD.Image
+	if runnerSpec.DinD != nil {
+		if runnerSpec.DinD.Image != "" {
+			dindImage = runnerSpec.DinD.Image
 		}
-		if scaleSet.Spec.DinD.DockerGroupGID != "" {
-			groupGID = scaleSet.Spec.DinD.DockerGroupGID
+		if runnerSpec.DinD.DockerGroupGID != "" {
+			groupGID = runnerSpec.DinD.DockerGroupGID
 		}
-		dindRes = scaleSet.Spec.DinD.Resources
-		dindArgs = scaleSet.Spec.DinD.Args
-		dindEnv = append([]corev1.EnvVar{}, scaleSet.Spec.DinD.Env...)
-		dindSecCtx = scaleSet.Spec.DinD.SecurityContext
+		dindRes = runnerSpec.DinD.Resources
+		dindArgs = runnerSpec.DinD.Args
+		dindEnv = append([]corev1.EnvVar{}, runnerSpec.DinD.Env...)
+		dindSecCtx = runnerSpec.DinD.SecurityContext
 	}
 
 	if len(dindArgs) == 0 {
@@ -269,8 +269,8 @@ func buildDindContainer(scaleSet *ghav1alpha1.RunnerScaleSet) corev1.Container {
 			"--host=unix:///var/run/docker.sock",
 			"--group=$(DOCKER_GROUP_GID)",
 		}
-		if scaleSet.Spec.DinD != nil && scaleSet.Spec.DinD.MTU != "" {
-			dindArgs = append(dindArgs, fmt.Sprintf("--mtu=%s", scaleSet.Spec.DinD.MTU))
+		if runnerSpec.DinD != nil && runnerSpec.DinD.MTU != "" {
+			dindArgs = append(dindArgs, fmt.Sprintf("--mtu=%s", runnerSpec.DinD.MTU))
 		}
 	}
 
@@ -310,6 +310,7 @@ func buildDindContainer(scaleSet *ghav1alpha1.RunnerScaleSet) corev1.Container {
 			},
 			InitialDelaySeconds: 0,
 			PeriodSeconds:       5,
+			TimeoutSeconds:      10,
 			FailureThreshold:    24,
 		},
 		VolumeMounts: []corev1.VolumeMount{

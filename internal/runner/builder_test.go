@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 )
@@ -141,6 +142,9 @@ func TestBuildRunnerPod_DinDInjection(t *testing.T) {
 	if dindC.SecurityContext == nil || dindC.SecurityContext.Privileged == nil || !*dindC.SecurityContext.Privileged {
 		t.Errorf("expected privileged true for dind sidecar")
 	}
+	if dindC.StartupProbe == nil || dindC.StartupProbe.TimeoutSeconds != 10 {
+		t.Errorf("expected startupProbe timeoutSeconds 10, got %v", dindC.StartupProbe)
+	}
 
 	// 2. Verify volumes
 	volMap := make(map[string]bool)
@@ -183,8 +187,8 @@ func TestBuildRunnerPod_KubernetesMode(t *testing.T) {
 		Name: "test-scaleset",
 		UID:  "scaleset-uid-123",
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
-			ContainerMode: ghav1alpha1.ContainerModeKubernetes,
 			Runner: ghav1alpha1.RunnerTemplateSpec{
+				ContainerMode: ghav1alpha1.ContainerModeKubernetes,
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
@@ -218,13 +222,13 @@ func TestBuildRunnerPod_CustomDinDSpec(t *testing.T) {
 		Name: "test-scaleset",
 		UID:  "scaleset-uid-123",
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
-			ContainerMode: ghav1alpha1.ContainerModeDind,
-			DinD: &ghav1alpha1.DinDSpec{
-				Image:          "docker:26-dind",
-				DockerGroupGID: "999",
-				MTU:            "1400",
-			},
 			Runner: ghav1alpha1.RunnerTemplateSpec{
+				ContainerMode: ghav1alpha1.ContainerModeDind,
+				DinD: &ghav1alpha1.DinDSpec{
+					Image:          "docker:26-dind",
+					DockerGroupGID: "999",
+					MTU:            "1400",
+				},
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
@@ -282,15 +286,15 @@ func TestBuildRunnerPod_MetricsInjection(t *testing.T) {
 		Name: "test-scaleset",
 		UID:  "scaleset-uid-123",
 		Spec: ghav1alpha1.RunnerScaleSetSpec{
-			ContainerMode: ghav1alpha1.ContainerModeKubernetes,
-			Metrics: &ghav1alpha1.MetricsSpec{
-				Enabled:  true,
-				Endpoint: "http://default-collector.opentelemetry-collector.svc.cluster.local:4318/v1/metrics",
-				ExtraAttributes: map[string]string{
-					"cluster": "test-cluster",
-				},
-			},
 			Runner: ghav1alpha1.RunnerTemplateSpec{
+				ContainerMode: ghav1alpha1.ContainerModeKubernetes,
+				Metrics: &ghav1alpha1.MetricsSpec{
+					Enabled:  true,
+					Endpoint: "http://default-collector.opentelemetry-collector.svc.cluster.local:4318/v1/metrics",
+					ExtraAttributes: map[string]string{
+						"cluster": "test-cluster",
+					},
+				},
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
@@ -369,4 +373,58 @@ func TestBuildRunnerPod_MetricsInjection(t *testing.T) {
 	if _, ok := envMap[EnvRunnerMetricsExtraAttrs]; !ok {
 		t.Errorf("expected %s env var", EnvRunnerMetricsExtraAttrs)
 	}
+}
+
+func TestBuildRunnerPod_PodLevelResources(t *testing.T) {
+	scaleSet := &ghav1alpha1.RunnerScaleSet{
+		Name: "test-scaleset",
+		UID:  "scaleset-uid-123",
+		Spec: ghav1alpha1.RunnerScaleSetSpec{
+			Runner: ghav1alpha1.RunnerTemplateSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Resources: &corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resourceQuantity("500m"),
+								corev1.ResourceMemory: resourceQuantity("512Mi"),
+							},
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resourceQuantity("2"),
+								corev1.ResourceMemory: resourceQuantity("2Gi"),
+							},
+						},
+						Containers: []corev1.Container{
+							{
+								Name:  "runner",
+								Image: "ghcr.io/actions/actions-runner:latest",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	epRunner := &ghav1alpha1.EphemeralRunner{
+		Name: "test-runner",
+		UID:  "runner-uid-123",
+		Spec: ghav1alpha1.EphemeralRunnerSpec{
+			RunnerName: "test-runner",
+		},
+	}
+
+	pod := BuildRunnerPod("gha-runners", scaleSet, epRunner)
+	if pod.Spec.Resources == nil {
+		t.Fatalf("expected pod-level resources to be preserved, got nil")
+	}
+	if pod.Spec.Resources.Requests.Cpu().String() != "500m" {
+		t.Errorf("expected cpu request 500m, got %s", pod.Spec.Resources.Requests.Cpu().String())
+	}
+	if pod.Spec.Resources.Limits.Memory().String() != "2Gi" {
+		t.Errorf("expected memory limit 2Gi, got %s", pod.Spec.Resources.Limits.Memory().String())
+	}
+}
+
+func resourceQuantity(s string) resource.Quantity {
+	return resource.MustParse(s)
 }

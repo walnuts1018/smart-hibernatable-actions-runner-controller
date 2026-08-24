@@ -59,8 +59,8 @@ func (r *RunnerScaleSet) Default(_ context.Context, obj *RunnerScaleSet) error {
 	if obj.Spec.Scaling.MinRunners < 0 {
 		obj.Spec.Scaling.MinRunners = 0
 	}
-	if obj.Spec.ContainerMode == "" {
-		obj.Spec.ContainerMode = ContainerModeDind
+	if obj.Spec.Runner.ContainerMode == "" {
+		obj.Spec.Runner.ContainerMode = ContainerModeDind
 	}
 	return nil
 }

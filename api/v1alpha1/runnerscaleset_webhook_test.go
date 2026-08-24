@@ -56,8 +56,8 @@ func TestRunnerScaleSetDefaulting(t *testing.T) {
 	if ss.Spec.Scaling.MinRunners != 0 {
 		t.Errorf("expected MinRunners 0, got %d", ss.Spec.Scaling.MinRunners)
 	}
-	if ss.Spec.ContainerMode != ContainerModeDind {
-		t.Errorf("expected ContainerMode %q, got %q", ContainerModeDind, ss.Spec.ContainerMode)
+	if ss.Spec.Runner.ContainerMode != ContainerModeDind {
+		t.Errorf("expected ContainerMode %q, got %q", ContainerModeDind, ss.Spec.Runner.ContainerMode)
 	}
 }
 

@@ -107,6 +107,20 @@ type DinDSpec struct {
 
 // RunnerTemplateSpec defines the configuration of the ephemeral runner Pod.
 type RunnerTemplateSpec struct {
+	// ContainerMode specifies the container execution mode (default: "dind").
+	// When set to "dind" (default), Docker-in-Docker sidecar and externals init containers are automatically injected.
+	// +kubebuilder:default="dind"
+	// +optional
+	ContainerMode ContainerModeType `json:"containerMode,omitempty"`
+
+	// DinD provides optional fine-grained configuration for the Docker-in-Docker sidecar when ContainerMode is "dind".
+	// +optional
+	DinD *DinDSpec `json:"dind,omitempty"`
+
+	// Metrics defines settings for runner pod resource metrics collection and injection.
+	// +optional
+	Metrics *MetricsSpec `json:"metrics,omitempty"`
+
 	// Template is the pod template for executing ephemeral runner workloads on the remote cluster.
 	// +kubebuilder:validation:Required
 	Template corev1.PodTemplateSpec `json:"template"`
@@ -203,16 +217,6 @@ type RunnerScaleSetSpec struct {
 	// +optional
 	Suspend bool `json:"suspend,omitempty"`
 
-	// ContainerMode specifies the container execution mode (default: "dind").
-	// When set to "dind" (default), Docker-in-Docker sidecar and externals init containers are automatically injected.
-	// +kubebuilder:default="dind"
-	// +optional
-	ContainerMode ContainerModeType `json:"containerMode,omitempty"`
-
-	// DinD provides optional fine-grained configuration for the Docker-in-Docker sidecar when ContainerMode is "dind".
-	// +optional
-	DinD *DinDSpec `json:"dind,omitempty"`
-
 	// GitHub specifies the GitHub Actions connection and scale set target settings.
 	// +kubebuilder:validation:Required
 	GitHub GitHubScaleSetSpec `json:"github"`
@@ -229,10 +233,6 @@ type RunnerScaleSetSpec struct {
 	// Listener defines the configuration of the background listener deployment.
 	// +optional
 	Listener ListenerSpec `json:"listener,omitempty"`
-
-	// Metrics defines settings for runner pod resource metrics collection and injection.
-	// +optional
-	Metrics *MetricsSpec `json:"metrics,omitempty"`
 
 	// Runner defines the runner pod template and container settings.
 	// +kubebuilder:validation:Required
