@@ -94,7 +94,7 @@ func (f *fakeRemoteProvider) GetClusterUID(ctx context.Context, cluster *ghav1al
 	return "fake-cluster-uid", nil
 }
 
-func (f *fakeRemoteProvider) InvalidateCache(clusterKey string) {}
+func (f *fakeRemoteProvider) InvalidateCache(key client.ObjectKey) {}
 
 type fakePowerControllerFactory struct {
 	fakeCtrl *fakePowerController

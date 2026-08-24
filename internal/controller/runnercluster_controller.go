@@ -43,7 +43,7 @@ func (r *RunnerClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	var cluster ghav1alpha1.RunnerCluster
 	if err := r.Get(ctx, req.NamespacedName, &cluster); err != nil {
 		if apierrors.IsNotFound(err) {
-			r.RemoteProvider.InvalidateCache(fmt.Sprintf("%s/%s", req.Namespace, req.Name))
+			r.RemoteProvider.InvalidateCache(req.NamespacedName)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
@@ -165,8 +165,7 @@ func (r *RunnerClusterReconciler) checkClusterHealth(ctx context.Context, cluste
 				if r.Recorder != nil {
 					r.Recorder.Eventf(cluster, nil, corev1.EventTypeNormal, "ClusterAdopted", "Reconcile", "Adopted new cluster UID %s", clusterUID)
 				}
-				clusterKey := fmt.Sprintf("%s/%s", cluster.Namespace, cluster.Name)
-				r.RemoteProvider.InvalidateCache(clusterKey)
+				r.RemoteProvider.InvalidateCache(client.ObjectKeyFromObject(cluster))
 				cluster.Status.ClusterUID = clusterUID
 			} else {
 				log.Error(fmt.Errorf("cluster identity mismatch"), "remote cluster UID changed", "expected", cluster.Status.ClusterUID, "got", clusterUID)

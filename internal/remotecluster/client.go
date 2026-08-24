@@ -33,7 +33,7 @@ type Provider interface {
 	GetClusterUID(ctx context.Context, cluster *ghav1alpha1.RunnerCluster) (string, error)
 
 	// InvalidateCache drops any cached client for the given cluster and closes idle connections.
-	InvalidateCache(clusterKey string)
+	InvalidateCache(key client.ObjectKey)
 }
 
 type cachedClient struct {
@@ -41,7 +41,6 @@ type cachedClient struct {
 	discoveryClient discovery.DiscoveryInterface
 	httpClient      *http.Client
 	resourceVersion string
-	lastUsed        time.Time
 }
 
 type providerImpl struct {
@@ -61,11 +60,11 @@ func NewProvider(localClient client.Client, scheme *runtime.Scheme) Provider {
 }
 
 func (p *providerImpl) getKubeconfig(ctx context.Context, cluster *ghav1alpha1.RunnerCluster) ([]byte, string, error) {
+	if cluster.Namespace == "" {
+		return nil, "", fmt.Errorf("runner cluster namespace must not be empty")
+	}
 	secretRef := cluster.Spec.KubeconfigSecretRef
 	namespace := cluster.Namespace
-	if namespace == "" {
-		namespace = "default"
-	}
 
 	var secret corev1.Secret
 	if err := p.localClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: secretRef.Name}, &secret); err != nil {
@@ -86,6 +85,13 @@ func (p *providerImpl) getKubeconfig(ctx context.Context, cluster *ghav1alpha1.R
 }
 
 func (p *providerImpl) getCachedOrCreate(ctx context.Context, cluster *ghav1alpha1.RunnerCluster) (*cachedClient, error) {
+	if cluster.Namespace == "" {
+		return nil, fmt.Errorf("runner cluster namespace must not be empty")
+	}
+	if cluster.Name == "" {
+		return nil, fmt.Errorf("runner cluster name must not be empty")
+	}
+
 	kubeconfigData, rv, err := p.getKubeconfig(ctx, cluster)
 	if err != nil {
 		return nil, err
@@ -96,7 +102,6 @@ func (p *providerImpl) getCachedOrCreate(ctx context.Context, cluster *ghav1alph
 	p.cacheMu.RLock()
 	cached, ok := p.clients[clusterKey]
 	if ok && cached.resourceVersion == rv {
-		cached.lastUsed = time.Now()
 		p.cacheMu.RUnlock()
 		return cached, nil
 	}
@@ -107,7 +112,6 @@ func (p *providerImpl) getCachedOrCreate(ctx context.Context, cluster *ghav1alph
 
 	// Double check
 	if cached, ok := p.clients[clusterKey]; ok && cached.resourceVersion == rv {
-		cached.lastUsed = time.Now()
 		return cached, nil
 	}
 
@@ -115,13 +119,6 @@ func (p *providerImpl) getCachedOrCreate(ctx context.Context, cluster *ghav1alph
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse kubeconfig for cluster %s: %w", clusterKey, err)
 	}
-
-	// Timeout settings
-	timeout := 5 * time.Second
-	if cluster.Spec.Readiness.APIRequestTimeout != nil && cluster.Spec.Readiness.APIRequestTimeout.Duration > 0 {
-		timeout = cluster.Spec.Readiness.APIRequestTimeout.Duration
-	}
-	restConfig.Timeout = timeout
 
 	httpClient, err := rest.HTTPClientFor(restConfig)
 	if err != nil {
@@ -146,9 +143,13 @@ func (p *providerImpl) getCachedOrCreate(ctx context.Context, cluster *ghav1alph
 		discoveryClient: disc,
 		httpClient:      httpClient,
 		resourceVersion: rv,
-		lastUsed:        time.Now(),
 	}
+
+	old := p.clients[clusterKey]
 	p.clients[clusterKey] = newEntry
+	if old != nil && old.httpClient != nil {
+		old.httpClient.CloseIdleConnections()
+	}
 
 	return newEntry, nil
 }
@@ -175,13 +176,8 @@ func (p *providerImpl) CheckHealth(ctx context.Context, cluster *ghav1alpha1.Run
 	checkCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	_, err = entry.discoveryClient.RESTClient().Get().AbsPath("/readyz").DoRaw(checkCtx)
-	if err != nil {
-		// Fallback to server version check
-		_, err = entry.discoveryClient.ServerVersion()
-		if err != nil {
-			return fmt.Errorf("remote API server unreachable: %w", err)
-		}
+	if _, err := entry.discoveryClient.RESTClient().Get().AbsPath("/readyz").DoRaw(checkCtx); err != nil {
+		return fmt.Errorf("remote API server is not ready: %w", err)
 	}
 
 	return nil
@@ -218,7 +214,8 @@ func (p *providerImpl) GetClusterUID(ctx context.Context, cluster *ghav1alpha1.R
 	return string(ns.UID), nil
 }
 
-func (p *providerImpl) InvalidateCache(clusterKey string) {
+func (p *providerImpl) InvalidateCache(key client.ObjectKey) {
+	clusterKey := key.String()
 	p.cacheMu.Lock()
 	defer p.cacheMu.Unlock()
 	if cached, ok := p.clients[clusterKey]; ok {
