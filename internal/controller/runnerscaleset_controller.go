@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -799,9 +800,9 @@ func (r *RunnerScaleSetReconciler) computeSecretHash(ctx context.Context, namesp
 	}
 
 	h := sha256.New()
-	for k, v := range secret.Data {
+	for _, k := range slices.Sorted(maps.Keys(secret.Data)) {
 		h.Write([]byte(k))
-		h.Write(v)
+		h.Write(secret.Data[k])
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
