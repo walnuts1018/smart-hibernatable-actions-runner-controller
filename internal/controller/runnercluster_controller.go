@@ -169,7 +169,7 @@ func (r *RunnerClusterReconciler) checkClusterHealth(ctx context.Context, cluste
 				r.RemoteProvider.InvalidateCache(clusterKey)
 				cluster.Status.ClusterUID = clusterUID
 			} else {
-				log.Error(fmt.Errorf("cluster identity mismatch"), "remote cluster UID changed (expected %s, got %s)", cluster.Status.ClusterUID, clusterUID)
+				log.Error(fmt.Errorf("cluster identity mismatch"), "remote cluster UID changed", "expected", cluster.Status.ClusterUID, "got", clusterUID)
 				if r.Recorder != nil {
 					r.Recorder.Eventf(cluster, nil, corev1.EventTypeWarning, "ClusterIdentityMismatch", "Reconcile", "Remote cluster UID changed: expected %s, got %s", cluster.Status.ClusterUID, clusterUID)
 				}
