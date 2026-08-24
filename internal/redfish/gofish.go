@@ -78,7 +78,7 @@ func NewGofishController(spec ghav1alpha1.RedfishSpec, username, password string
 		return nil, fmt.Errorf("invalid Redfish endpoint: %w", err)
 	}
 	if u.Scheme != "https" {
-		return nil, fmt.Errorf("Redfish endpoint must use HTTPS (got %q)", spec.Endpoint)
+		return nil, fmt.Errorf("redfish endpoint must use HTTPS (got %q)", spec.Endpoint)
 	}
 
 	if len(caCert) > 0 {
@@ -234,7 +234,7 @@ func (c *gofishController) withSystem(ctx context.Context, fn func(sys *schemas.
 	}
 
 	if len(systems) == 0 {
-		return fmt.Errorf("Redfish endpoint exposes no computer systems")
+		return fmt.Errorf("redfish endpoint exposes no computer systems")
 	}
 
 	targetSystem, err := resolveSystem(systems, c.spec.SystemID)
@@ -404,8 +404,8 @@ func (c *gofishController) ForceOff(ctx context.Context) error {
 func (c *gofishController) ValidateSupport(ctx context.Context) error {
 	start := time.Now()
 	err := c.withSystem(ctx, func(sys *schemas.ComputerSystem) error {
-		supportedTypes, suppErr := sys.GetSupportedResetTypes()
-		if suppErr != nil || len(supportedTypes) == 0 {
+		supportedTypes, _ := sys.GetSupportedResetTypes()
+		if len(supportedTypes) == 0 {
 			// If BMC doesn't advertise allowable values via ActionInfo/AllowableValues,
 			// having reached the ComputerSystem resource successfully is sufficient.
 			return nil
@@ -447,8 +447,7 @@ func isUnsupportedResetError(err error) bool {
 		return false
 	}
 
-	var redfishErr *schemas.Error
-	if errors.As(err, &redfishErr) {
+	if redfishErr, ok := errors.AsType[*schemas.Error](err); ok {
 		code := strings.ToLower(redfishErr.Code)
 		if strings.Contains(code, "actionparameternotsupported") ||
 			strings.Contains(code, "actionnotsupported") ||

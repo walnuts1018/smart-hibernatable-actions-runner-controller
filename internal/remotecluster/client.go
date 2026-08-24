@@ -126,9 +126,9 @@ func (p *providerImpl) getCachedOrCreate(ctx context.Context, cluster *ghav1alph
 
 	if insecure {
 		restConfig.Insecure = true
-		restConfig.TLSClientConfig.Insecure = true
-		restConfig.TLSClientConfig.CAData = nil
-		restConfig.TLSClientConfig.CAFile = ""
+		restConfig.Insecure = true
+		restConfig.CAData = nil
+		restConfig.CAFile = ""
 	}
 
 	httpClient, err := rest.HTTPClientFor(restConfig)

@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -19,7 +18,7 @@ import (
 )
 
 func makeKubeconfig(serverURL string) []byte {
-	return []byte(fmt.Sprintf(`
+	return fmt.Appendf(nil, `
 apiVersion: v1
 clusters:
 - cluster:
@@ -37,7 +36,7 @@ users:
 - name: test-user
   user:
     token: test-token
-`, serverURL))
+`, serverURL)
 }
 
 func TestProvider_CheckHealth_ReadyzFailure(t *testing.T) {
@@ -62,11 +61,9 @@ func TestProvider_CheckHealth_ReadyzFailure(t *testing.T) {
 	defer server.Close()
 
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:       "test-ns",
-			Name:            "remote-kubeconfig",
-			ResourceVersion: "1",
-		},
+		Namespace:       "test-ns",
+		Name:            "remote-kubeconfig",
+		ResourceVersion: "1",
 		Data: map[string][]byte{
 			"kubeconfig": makeKubeconfig(server.URL),
 		},
@@ -76,10 +73,8 @@ func TestProvider_CheckHealth_ReadyzFailure(t *testing.T) {
 	provider := NewProvider(localClient, scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "test-ns",
-			Name:      "test-cluster",
-		},
+		Namespace: "test-ns",
+		Name:      "test-cluster",
 		Spec: ghav1alpha1.RunnerClusterSpec{
 			KubeconfigSecretRef: corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{
@@ -116,11 +111,9 @@ func TestProvider_ConcurrentAccess(t *testing.T) {
 	defer server.Close()
 
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:       "test-ns",
-			Name:            "remote-kubeconfig",
-			ResourceVersion: "1",
-		},
+		Namespace:       "test-ns",
+		Name:            "remote-kubeconfig",
+		ResourceVersion: "1",
 		Data: map[string][]byte{
 			"kubeconfig": makeKubeconfig(server.URL),
 		},
@@ -130,10 +123,8 @@ func TestProvider_ConcurrentAccess(t *testing.T) {
 	provider := NewProvider(localClient, scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "test-ns",
-			Name:      "test-cluster",
-		},
+		Namespace: "test-ns",
+		Name:      "test-cluster",
 		Spec: ghav1alpha1.RunnerClusterSpec{
 			KubeconfigSecretRef: corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{
@@ -145,18 +136,16 @@ func TestProvider_ConcurrentAccess(t *testing.T) {
 
 	// Concurrently call GetClient, CheckHealth, and InvalidateCache
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 10; j++ {
+	for range 20 {
+		wg.Go(func() {
+			for j := range 10 {
 				_, _ = provider.GetClient(context.Background(), cluster)
 				_ = provider.CheckHealth(context.Background(), cluster)
 				if j%3 == 0 {
 					provider.InvalidateCache(client.ObjectKey{Namespace: "test-ns", Name: "test-cluster"})
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -177,11 +166,9 @@ func TestProvider_CacheReplacedOnSecretUpdate(t *testing.T) {
 	defer server2.Close()
 
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:       "test-ns",
-			Name:            "remote-kubeconfig",
-			ResourceVersion: "1",
-		},
+		Namespace:       "test-ns",
+		Name:            "remote-kubeconfig",
+		ResourceVersion: "1",
 		Data: map[string][]byte{
 			"kubeconfig": makeKubeconfig(server1.URL),
 		},
@@ -191,10 +178,8 @@ func TestProvider_CacheReplacedOnSecretUpdate(t *testing.T) {
 	provider := NewProvider(localClient, scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "test-ns",
-			Name:      "test-cluster",
-		},
+		Namespace: "test-ns",
+		Name:      "test-cluster",
 		Spec: ghav1alpha1.RunnerClusterSpec{
 			KubeconfigSecretRef: corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{
@@ -238,10 +223,8 @@ func TestProvider_EmptyNamespaceValidation(t *testing.T) {
 	provider := NewProvider(localClient, scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "",
-			Name:      "test-cluster",
-		},
+		Namespace: "",
+		Name:      "test-cluster",
 	}
 
 	_, err := provider.GetClient(context.Background(), cluster)
@@ -267,11 +250,9 @@ func TestProvider_InsecureSkipTLSVerify(t *testing.T) {
 	defer tlsServer.Close()
 
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:       "test-ns",
-			Name:            "remote-kubeconfig",
-			ResourceVersion: "1",
-		},
+		Namespace:       "test-ns",
+		Name:            "remote-kubeconfig",
+		ResourceVersion: "1",
 		Data: map[string][]byte{
 			// Server URL is https://... without CA certificate
 			"kubeconfig": makeKubeconfig(tlsServer.URL),
@@ -282,10 +263,8 @@ func TestProvider_InsecureSkipTLSVerify(t *testing.T) {
 	provider := NewProvider(localClient, scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "test-ns",
-			Name:      "test-cluster",
-		},
+		Namespace: "test-ns",
+		Name:      "test-cluster",
 		Spec: ghav1alpha1.RunnerClusterSpec{
 			KubeconfigSecretRef: corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{
