@@ -1,4 +1,7 @@
-# This patch adds the args to allow exposing the metrics endpoint using HTTPS
+# This patch enables the OpenTelemetry Prometheus exporter.
 - op: add
   path: /spec/template/spec/containers/0/args/0
-  value: --metrics-bind-address=:8443
+  value: --metrics-bind-address=:8080
+- op: replace
+  path: /spec/template/spec/containers/0/env/0/value
+  value: prometheus

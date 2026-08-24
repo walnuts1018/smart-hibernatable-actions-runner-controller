@@ -6,8 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	ctrl "sigs.k8s.io/controller-runtime"
+
+	sharcmetrics "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/metrics"
 )
 
 var readinessLogger = ctrl.Log.WithName("listener-readiness")
@@ -130,9 +131,9 @@ func StartHTTPServer(ctx context.Context, probeAddr, metricsAddr string, tracker
 		}
 	})
 
-	// Metrics endpoint (同一ポートまたは別ポートで提供可能)
-	if probeAddr == metricsAddr || metricsAddr == "" {
-		mux.Handle("/metrics", promhttp.Handler())
+	// Prometheus exporterを選択した場合は、同一ポートでメトリクスを公開できる。
+	if handler := sharcmetrics.Handler(); handler != nil && (probeAddr == metricsAddr || metricsAddr == "") {
+		mux.Handle("/metrics", handler)
 	}
 
 	probeServer := &http.Server{}
@@ -148,9 +149,9 @@ func StartHTTPServer(ctx context.Context, probeAddr, metricsAddr string, tracker
 	}()
 
 	var metricsServer *http.Server
-	if metricsAddr != "" && metricsAddr != probeAddr {
+	if handler := sharcmetrics.Handler(); handler != nil && metricsAddr != "" && metricsAddr != probeAddr {
 		metricsMux := http.NewServeMux()
-		metricsMux.Handle("/metrics", promhttp.Handler())
+		metricsMux.Handle("/metrics", handler)
 		metricsServer = &http.Server{}
 		metricsServer.Addr = metricsAddr
 		metricsServer.Handler = metricsMux

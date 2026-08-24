@@ -73,6 +73,26 @@ type ListenerSpec struct {
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
+// MetricsSpec defines configuration for injecting metrics collection into runner pods.
+type MetricsSpec struct {
+	// Enabled specifies whether runner pod metrics collection is enabled.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Endpoint is the OTLP/HTTP endpoint to export metrics to (e.g., http://default-collector.opentelemetry-collector.svc.cluster.local:4318/v1/metrics).
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+
+	// Image is the container image containing the runner-hook binary used for injection.
+	// Defaults to the controller/hook image configured at controller level.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// ExtraAttributes defines additional resource or metric attributes to append to exported metrics.
+	// +optional
+	ExtraAttributes map[string]string `json:"extraAttributes,omitempty"`
+}
+
 // RunnerScaleSetSpec defines the desired state of RunnerScaleSet.
 type RunnerScaleSetSpec struct {
 	// Suspend suspends runner scaling and causes the listener to advertise 0 capacity.
@@ -96,6 +116,10 @@ type RunnerScaleSetSpec struct {
 	// Listener defines the configuration of the background listener deployment.
 	// +optional
 	Listener ListenerSpec `json:"listener,omitempty"`
+
+	// Metrics defines settings for runner pod resource metrics collection and injection.
+	// +optional
+	Metrics *MetricsSpec `json:"metrics,omitempty"`
 
 	// Runner defines the runner pod template and container settings.
 	// +kubebuilder:validation:Required

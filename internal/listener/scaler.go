@@ -104,7 +104,7 @@ func (s *ScalerHandler) HandleJobStarted(ctx context.Context, jobInfo *scaleset.
 	scalerLogger.Info("job started on runner", "runnerName", jobInfo.RunnerName)
 
 	if !jobInfo.QueueTime.IsZero() {
-		metrics.JobQueueToStartedObservedSeconds.WithLabelValues(s.namespace, s.name).Observe(time.Since(jobInfo.QueueTime).Seconds())
+		metrics.JobQueueToStartedObservedSeconds.WithLabelValues(s.namespace, s.name).Observe(ctx, time.Since(jobInfo.QueueTime).Seconds())
 	}
 
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {

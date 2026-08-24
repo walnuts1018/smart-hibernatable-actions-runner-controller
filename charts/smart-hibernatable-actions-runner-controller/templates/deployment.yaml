@@ -33,6 +33,9 @@ spec:
           args:
           - --leader-elect
           - --health-probe-bind-address=:8081
+          {{- if eq .Values.telemetry.metrics.exporter "prometheus" }}
+          - --metrics-bind-address=:{{ .Values.telemetry.prometheus.port }}
+          {{- end }}
           {{- if .Values.listenerImage.repository }}
           - --listener-image={{ .Values.listenerImage.repository }}:{{ .Values.listenerImage.tag | default .Chart.AppVersion }}
           {{- end }}
@@ -40,22 +43,77 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if .Values.webhook.enabled }}
           env:
+            - name: OTEL_METRICS_EXPORTER
+              value: {{ .Values.telemetry.metrics.exporter | quote }}
+            {{- with .Values.telemetry.serviceName }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.telemetry.resourceAttributes }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.telemetry.metrics.exportInterval }}
+            - name: OTEL_METRIC_EXPORT_INTERVAL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.telemetry.metrics.exportTimeout }}
+            - name: OTEL_METRIC_EXPORT_TIMEOUT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if eq .Values.telemetry.metrics.exporter "otlp" }}
+            {{- with .Values.telemetry.otlp.endpoint }}
+            - name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.telemetry.otlp.protocol }}
+            - name: OTEL_EXPORTER_OTLP_METRICS_PROTOCOL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.telemetry.otlp.headers }}
+            - name: OTEL_EXPORTER_OTLP_METRICS_HEADERS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.telemetry.otlp.compression }}
+            - name: OTEL_EXPORTER_OTLP_METRICS_COMPRESSION
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.telemetry.otlp.timeout }}
+            - name: OTEL_EXPORTER_OTLP_METRICS_TIMEOUT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
             - name: ENABLE_WEBHOOKS
+              {{- if .Values.webhook.enabled }}
               value: "true"
+              {{- else }}
+              value: "false"
+              {{- end }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if .Values.webhook.enabled }}
           ports:
             - name: webhook-server
               containerPort: {{ .Values.webhook.port | default 9443 }}
               protocol: TCP
+            {{- if eq .Values.telemetry.metrics.exporter "prometheus" }}
+            - name: metrics
+              containerPort: {{ .Values.telemetry.prometheus.port }}
+              protocol: TCP
+            {{- end }}
           volumeMounts:
             - name: webhook-certs
               mountPath: /tmp/k8s-webhook-server/serving-certs
               readOnly: true
           {{- else }}
-          env:
-            - name: ENABLE_WEBHOOKS
-              value: "false"
+          {{- if eq .Values.telemetry.metrics.exporter "prometheus" }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.telemetry.prometheus.port }}
+              protocol: TCP
+          {{- end }}
           {{- end }}
           livenessProbe:
             httpGet:

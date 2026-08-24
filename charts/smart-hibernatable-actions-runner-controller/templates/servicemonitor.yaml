@@ -1,18 +1,18 @@
-{{- if and .Values.metrics.service.enabled .Values.metrics.serviceMonitor.enabled }}
+{{- if and (eq .Values.telemetry.metrics.exporter "prometheus") .Values.telemetry.prometheus.service.enabled .Values.telemetry.prometheus.serviceMonitor.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: {{ include "smart-hibernatable-actions-runner-controller.fullname" . }}
   labels:
     {{- include "smart-hibernatable-actions-runner-controller.labels" . | nindent 4 }}
-    {{- with .Values.metrics.serviceMonitor.additionalLabels }}
+    {{- with .Values.telemetry.prometheus.serviceMonitor.additionalLabels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
   endpoints:
     - port: metrics
-      interval: {{ .Values.metrics.serviceMonitor.interval }}
-      scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}
+      interval: {{ .Values.telemetry.prometheus.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.telemetry.prometheus.serviceMonitor.scrapeTimeout }}
   selector:
     matchLabels:
       {{- include "smart-hibernatable-actions-runner-controller.selectorLabels" . | nindent 6 }}

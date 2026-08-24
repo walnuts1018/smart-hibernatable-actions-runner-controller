@@ -468,7 +468,7 @@ func (r *RunnerMachineReconciler) reconcileActive(
 					r.Recorder.Eventf(m, nil, corev1.EventTypeWarning, "PowerOnFailed", "PowerOn", "Failed to power on machine %s: %v", m.Name, err)
 				}
 			} else {
-				metrics.PowerTransitionsTotal.WithLabelValues(m.Namespace, m.Name, "PowerOn").Inc()
+				metrics.PowerTransitionsTotal.WithLabelValues(m.Namespace, m.Name, "PowerOn").Inc(ctx)
 			}
 		}
 		return 10 * time.Second
@@ -717,7 +717,7 @@ func (r *RunnerMachineReconciler) handleShutdownTimeout(
 			if err := pwrCtrl.ForceOff(ctx); err != nil {
 				log.Error(err, "failed to force off machine", "machine", m.Name)
 			} else {
-				metrics.PowerTransitionsTotal.WithLabelValues(m.Namespace, m.Name, "ForceOff").Inc()
+				metrics.PowerTransitionsTotal.WithLabelValues(m.Namespace, m.Name, "ForceOff").Inc(ctx)
 			}
 		}
 	}
@@ -753,7 +753,7 @@ func (r *RunnerMachineReconciler) initiateGracefulShutdown(
 			m.Status.PowerState = ghav1alpha1.PowerStatePoweringOff
 			nowTrans := metav1.Now()
 			m.Status.LastPowerTransitionTime = &nowTrans
-			metrics.PowerTransitionsTotal.WithLabelValues(m.Namespace, m.Name, "PowerOff").Inc()
+			metrics.PowerTransitionsTotal.WithLabelValues(m.Namespace, m.Name, "PowerOff").Inc(ctx)
 		}
 	}
 }

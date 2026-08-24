@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 	"strings"
+	"time"
 
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -14,6 +16,7 @@ import (
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
 	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/listener"
 	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/logger"
+	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/metrics"
 )
 
 var mainLog = ctrl.Log.WithName("listener-main")
@@ -65,6 +68,17 @@ func main() {
 	}
 
 	ctx := ctrl.SetupSignalHandler()
+	if err := metrics.Setup(ctx, "sharc-listener"); err != nil {
+		mainLog.Error(err, "failed to configure OpenTelemetry metrics")
+		os.Exit(1)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := metrics.Shutdown(shutdownCtx); err != nil {
+			mainLog.Error(err, "failed to shut down OpenTelemetry metrics")
+		}
+	}()
 
 	runnerOpts := listener.RunnerOptions{
 		Namespace:   namespace,

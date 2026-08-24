@@ -65,6 +65,9 @@ spec:
           - --health-probe-bind-address=:8081
         image: controller:latest
         name: manager
+        env:
+        - name: OTEL_METRICS_EXPORTER
+          value: none
         ports:
         - containerPort: 8081
           name: health

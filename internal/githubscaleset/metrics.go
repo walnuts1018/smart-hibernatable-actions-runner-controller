@@ -49,7 +49,7 @@ type metricsRecorderImpl struct {
 
 var _ listener.MetricsRecorder = (*metricsRecorderImpl)(nil)
 
-// NewMetricsRecorder creates a listener.MetricsRecorder connected purely to Prometheus metrics and optional StatisticsStore.
+// NewMetricsRecorder creates a listener.MetricsRecorder connected to OpenTelemetry metrics and an optional StatisticsStore.
 func NewMetricsRecorder(namespace, name string, store *StatisticsStore) listener.MetricsRecorder {
 	return &metricsRecorderImpl{
 		namespace: namespace,
@@ -88,7 +88,7 @@ func (m *metricsRecorderImpl) RecordDesiredRunners(count int) {
 	metrics.DesiredRunners.WithLabelValues(m.namespace, m.name).Set(float64(count))
 }
 
-// CleanupMetrics deletes Prometheus gauge series for the given scale set.
+// CleanupMetrics deletes observable gauge series for the given scale set.
 func CleanupMetrics(namespace, name string) {
 	metrics.AvailableJobs.DeleteLabelValues(namespace, name)
 	metrics.AcquiredJobs.DeleteLabelValues(namespace, name)

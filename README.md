@@ -136,6 +136,50 @@ kubectl apply -f ./sharc-resources.yaml
 
 At this stage, the controller listener will connect to GitHub Actions. When jobs targeting `arc-sample-runners` are queued, SHARC powers on the physical node (`RunnerMachine`) via Redfish BMC, waits for the Kubernetes node to become ready, creates `EphemeralRunner` pods to execute the workflows, and safely drains and powers off (hibernates) idle nodes.
 
+## OpenTelemetry Metrics
+
+Metrics are disabled by default with `OTEL_METRICS_EXPORTER=none`. OpenTelemetry settings configured through the Helm chart are converted to standard `OTEL_*` environment variables and propagated to listener Pods.
+
+Push metrics to an OTLP/gRPC collector:
+
+```yaml
+telemetry:
+  serviceName: sharc
+  resourceAttributes: deployment.environment.name=production
+  metrics:
+    exporter: otlp
+    exportInterval: "30000"
+  otlp:
+    endpoint: http://opentelemetry-collector.observability:4317
+    protocol: grpc
+```
+
+Set `telemetry.otlp.protocol` to `http/protobuf` to use OTLP/HTTP. Headers, compression, and timeout can also be configured under `telemetry.otlp`. To expose a Prometheus-compatible Pull endpoint and create a `ServiceMonitor`:
+
+```yaml
+telemetry:
+  metrics:
+    exporter: prometheus
+  prometheus:
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+```
+
+Environment variables unrelated to telemetry can be added directly to the manager container. Kubernetes `valueFrom` sources are also supported:
+
+```yaml
+env:
+  - name: HTTP_PROXY
+    value: http://proxy.example.com:3128
+  - name: EXAMPLE_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: example
+        key: token
+```
+
 ## Development
 
 ### Prerequisites

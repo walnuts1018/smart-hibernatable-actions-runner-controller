@@ -245,13 +245,13 @@ func (c *gofishController) withSystem(ctx context.Context, fn func(sys *schemas.
 	return fn(targetSystem)
 }
 
-func recordRedfishMetric(operation string, startTime time.Time, err error) {
+func recordRedfishMetric(ctx context.Context, operation string, startTime time.Time, err error) {
 	result := "success"
 	if err != nil {
 		result = "error"
 	}
-	metrics.RedfishRequestsTotal.WithLabelValues("global", "redfish", operation, result).Inc()
-	metrics.RedfishRequestDuration.WithLabelValues("global", "redfish", operation).Observe(time.Since(startTime).Seconds())
+	metrics.RedfishRequestsTotal.WithLabelValues("global", "redfish", operation, result).Inc(ctx)
+	metrics.RedfishRequestDuration.WithLabelValues("global", "redfish", operation).Observe(ctx, time.Since(startTime).Seconds())
 }
 
 func (c *gofishController) GetPowerState(ctx context.Context) (ghav1alpha1.PowerState, error) {
@@ -274,7 +274,7 @@ func (c *gofishController) GetPowerState(ctx context.Context) (ghav1alpha1.Power
 		}
 		return nil
 	})
-	recordRedfishMetric("get_power_state", start, err)
+	recordRedfishMetric(ctx, "get_power_state", start, err)
 	if err != nil {
 		return ghav1alpha1.PowerStateUnknown, err
 	}
@@ -331,7 +331,7 @@ func (c *gofishController) PowerOn(ctx context.Context) error {
 		}
 		return nil
 	})
-	recordRedfishMetric("power_on", start, err)
+	recordRedfishMetric(ctx, "power_on", start, err)
 	return err
 }
 
@@ -384,7 +384,7 @@ func (c *gofishController) GracefulShutdown(ctx context.Context) error {
 		}
 		return err
 	})
-	recordRedfishMetric("graceful_shutdown", start, err)
+	recordRedfishMetric(ctx, "graceful_shutdown", start, err)
 	return err
 }
 
@@ -397,7 +397,7 @@ func (c *gofishController) ForceOff(ctx context.Context) error {
 		_, err := sys.Reset(schemas.ForceOffResetType)
 		return err
 	})
-	recordRedfishMetric("force_off", start, err)
+	recordRedfishMetric(ctx, "force_off", start, err)
 	return err
 }
 
@@ -438,7 +438,7 @@ func (c *gofishController) ValidateSupport(ctx context.Context) error {
 
 		return nil
 	})
-	recordRedfishMetric("validate_support", start, err)
+	recordRedfishMetric(ctx, "validate_support", start, err)
 	return err
 }
 

@@ -41,6 +41,9 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 
+# Additional environment variables for the manager container.
+env: []
+
 webhook:
   enabled: false
   port: 9443
@@ -48,23 +51,26 @@ webhook:
     enabled: true
     certSecretName: ""
 
-metrics:
-  service:
-    enabled: true
+telemetry:
+  serviceName: ""
+  resourceAttributes: ""
+  metrics:
+    # Supported values are none, prometheus, and otlp.
+    exporter: none
+    exportInterval: ""
+    exportTimeout: ""
+  otlp:
+    endpoint: ""
+    protocol: grpc
+    headers: ""
+    compression: ""
+    timeout: ""
+  prometheus:
     port: 8080
-  serviceMonitor:
-    enabled: false
-    interval: 30s
-    scrapeTimeout: 10s
-    additionalLabels: {}
-  prometheusRule:
-    enabled: false
-    additionalLabels: {}
-    rules:
-      listenerDisconnected: true
-      listenerPollStale: true
-      gitHubAuthFailed: true
-      capacityDeficit: true
-      machineStartupStuck: true
-      forceOffUsed: true
-
+    service:
+      enabled: true
+    serviceMonitor:
+      enabled: false
+      interval: 30s
+      scrapeTimeout: 10s
+      additionalLabels: {}

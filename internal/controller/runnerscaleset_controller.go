@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -556,6 +558,14 @@ func (r *RunnerScaleSetReconciler) reconcileListenerDeployment(ctx context.Conte
 			WithInitialDelaySeconds(2).
 			WithPeriodSeconds(5),
 		)
+
+	// Listenerはmanagerと同じOpenTelemetry設定を引き継ぎ、独立したプロセスとしてメトリクスを送信する。
+	for _, entry := range os.Environ() {
+		key, value, found := strings.Cut(entry, "=")
+		if found && strings.HasPrefix(key, "OTEL_") {
+			containerApply = containerApply.WithEnv(corev1apply.EnvVar().WithName(key).WithValue(value))
+		}
+	}
 
 	if ss.Spec.Listener.Resources.Limits != nil || ss.Spec.Listener.Resources.Requests != nil {
 		resApply := corev1apply.ResourceRequirements()
