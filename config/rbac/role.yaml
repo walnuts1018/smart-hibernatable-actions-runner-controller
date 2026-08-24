@@ -59,6 +59,7 @@ rules:
   - gha.walnuts.dev
   resources:
   - ephemeralrunners
+  - ephemeralrunnersets
   - runnerclusters
   - runnermachines
   - runnernodepools
@@ -75,6 +76,7 @@ rules:
   - gha.walnuts.dev
   resources:
   - ephemeralrunners/finalizers
+  - ephemeralrunnersets/finalizers
   - runnerclusters/finalizers
   - runnermachines/finalizers
   - runnernodepools/finalizers
@@ -85,6 +87,7 @@ rules:
   - gha.walnuts.dev
   resources:
   - ephemeralrunners/status
+  - ephemeralrunnersets/status
   - runnerclusters/status
   - runnermachines/status
   - runnernodepools/status

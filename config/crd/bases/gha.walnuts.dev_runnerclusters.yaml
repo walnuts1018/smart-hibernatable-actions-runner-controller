@@ -55,20 +55,15 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of RunnerCluster
+            description: RunnerClusterSpec defines the desired state of RunnerCluster.
             properties:
               identity:
                 description: Identity defines identity and adoption expectations for
                   the cluster.
                 properties:
-                  adoptionGeneration:
-                    description: AdoptionGeneration is an incrementing counter to
-                      trigger adoption of ExpectedUID.
-                    format: int64
-                    type: integer
-                  expectedUID:
-                    description: ExpectedUID is the new kube-system namespace UID
-                      expected when re-adopting a re-provisioned cluster.
+                  expectedClusterUID:
+                    description: ExpectedClusterUID is the new kube-system namespace
+                      UID expected when adopting a re-provisioned cluster.
                     type: string
                 type: object
               kubeconfigSecretRef:
@@ -95,9 +90,6 @@ spec:
                 - key
                 type: object
                 x-kubernetes-map-type: atomic
-                x-kubernetes-validations:
-                - message: kubeconfigSecretRef is immutable
-                  rule: self == oldSelf
               readiness:
                 description: Readiness defines timeouts and parameters for checking
                   cluster readiness.
@@ -119,11 +111,36 @@ spec:
                 description: RunnerNamespace is the namespace on the runner cluster
                   where runner Pods and Secrets are created.
                 type: string
+              startup:
+                description: Startup defines machines that must be powered on to start
+                  the remote cluster API.
+                properties:
+                  machineRefs:
+                    description: MachineRefs lists the RunnerMachines required to
+                      bring up the remote cluster control plane / API.
+                    items:
+                      description: |-
+                        LocalObjectReference contains enough information to let you locate the
+                        referenced object inside the same namespace.
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    type: array
+                type: object
             required:
             - kubeconfigSecretRef
             type: object
           status:
-            description: status defines the observed state of RunnerCluster
+            description: RunnerClusterStatus defines the observed state of RunnerCluster.
             properties:
               apiReachable:
                 description: APIReachable indicates whether the runner cluster's Kubernetes
@@ -194,9 +211,9 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              observedAdoptionGeneration:
-                description: ObservedAdoptionGeneration records the last successfully
-                  processed AdoptionGeneration.
+              observedGeneration:
+                description: ObservedGeneration is the most recent generation observed
+                  for this resource.
                 format: int64
                 type: integer
               phase:
@@ -210,8 +227,6 @@ spec:
                 - Unknown
                 type: string
             type: object
-        required:
-        - spec
         type: object
     served: true
     storage: true

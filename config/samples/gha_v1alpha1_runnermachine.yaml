@@ -2,16 +2,18 @@ apiVersion: gha.walnuts.dev/v1alpha1
 kind: RunnerMachine
 metadata:
   name: gha-amd64-01
-  labels:
-    gha.walnuts.dev/pool: amd64
 spec:
   clusterRef:
     name: gha-amd64
-  kubernetesNodeName: gha-amd64-01
-  bootstrap: true
+  nodePoolRef:
+    name: amd64
+  nodeName: gha-amd64-01
+  powerPolicy: OnDemand
   priority: 100
   capacity:
-    runners: 2
+    runnerSlots: 2
+  drain:
+    timeout: 10m
   redfish:
     endpoint: https://192.168.10.50
     systemID: "1"
@@ -23,5 +25,6 @@ spec:
         key: ca.crt
       insecureSkipVerify: false
     power:
-      shutdownTimeout: 3m
-      forceOffAfter: 0s
+      shutdown:
+        timeout: 3m
+        timeoutPolicy: Abort

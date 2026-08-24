@@ -1,9 +1,8 @@
 apiVersion: gha.walnuts.dev/v1alpha1
 kind: EphemeralRunner
 metadata:
-  labels:
-    app.kubernetes.io/name: smart-hibernatable-actions-runner-controller
-    app.kubernetes.io/managed-by: kustomize
-  name: ephemeralrunner-sample
+  name: sample-medium-amd64-001
 spec:
-  # TODO(user): Add fields here
+  scaleSetRef:
+    name: sample-medium-amd64
+  runnerName: sample-medium-amd64-001

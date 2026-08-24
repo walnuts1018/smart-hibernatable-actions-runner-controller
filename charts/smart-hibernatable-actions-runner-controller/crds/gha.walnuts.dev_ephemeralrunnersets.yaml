@@ -69,11 +69,6 @@ spec:
                 description: Runner defines the runner pod template and container
                   settings.
                 properties:
-                  containerName:
-                    default: runner
-                    description: ContainerName is the name of the primary runner container
-                      in the pod template.
-                    type: string
                   template:
                     description: Template is the pod template for executing ephemeral
                       runner workloads on the remote cluster.
@@ -8607,10 +8602,6 @@ spec:
                         - containers
                         type: object
                     type: object
-                  workDir:
-                    default: _work
-                    description: WorkDir is the working directory for runner jobs.
-                    type: string
                 required:
                 - template
                 type: object

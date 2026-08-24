@@ -1,19 +1,11 @@
 apiVersion: gha.walnuts.dev/v1alpha1
-kind: RunnerScaleSet
+kind: EphemeralRunnerSet
 metadata:
   name: sample-medium-amd64
 spec:
-  github:
-    configURL: https://github.com/example-org
-    scaleSetName: arc-sample-medium-amd64
-    runnerGroup: default
-    credentialsSecretRef:
-      name: github-actions-app
-  nodePoolRef:
-    name: amd64
-  scaling:
-    minRunners: 0
-    maxRunners: 2
+  scaleSetRef:
+    name: sample-medium-amd64
+  replicas: 1
   runner:
     template:
       spec:

@@ -5,11 +5,9 @@ metadata:
 spec:
   clusterRef:
     name: gha-amd64
-  machineSelector:
-    matchLabels:
-      gha.walnuts.dev/pool: amd64
   scaling:
     minNodes: 0
     maxNodes: 1
     scaleDownDelay: 10m
-    strategy: Ordered
+  drain:
+    timeout: 10m

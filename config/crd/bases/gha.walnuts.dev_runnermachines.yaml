@@ -29,14 +29,14 @@ spec:
       jsonPath: .status.kubernetes.ready
       name: Node Ready
       type: boolean
-    - description: Declared runner capacity
-      jsonPath: .spec.capacity.runners
-      name: Runners Capacity
+    - description: Declared runner slots capacity
+      jsonPath: .spec.capacity.runnerSlots
+      name: Runner Slots
       type: integer
-    - description: Bootstrap machine flag
-      jsonPath: .spec.bootstrap
-      name: Bootstrap
-      type: boolean
+    - description: Scale-up priority
+      jsonPath: .spec.priority
+      name: Priority
+      type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -65,23 +65,18 @@ spec:
           spec:
             description: RunnerMachineSpec defines the desired state of RunnerMachine.
             properties:
-              bootstrap:
-                default: false
-                description: Bootstrap indicates whether this machine is the bootstrap
-                  node required for the runner cluster Kubernetes API to be available.
-                type: boolean
               capacity:
                 description: Capacity specifies the runner capacity provided by this
                   machine.
                 properties:
-                  runners:
-                    description: Runners is the maximum number of concurrent runner
-                      Pods this machine can host.
+                  runnerSlots:
+                    description: RunnerSlots is the maximum number of concurrent runner
+                      slots this machine provides for capacity planning.
                     format: int32
                     minimum: 1
                     type: integer
                 required:
-                - runners
+                - runnerSlots
                 type: object
               clusterRef:
                 description: ClusterRef references the RunnerCluster this machine
@@ -101,13 +96,15 @@ spec:
                 x-kubernetes-validations:
                 - message: clusterRef is immutable
                   rule: self == oldSelf
-              kubernetesNodeName:
-                description: KubernetesNodeName is the expected Node name in the runner
-                  Kubernetes cluster.
-                type: string
-                x-kubernetes-validations:
-                - message: kubernetesNodeName is immutable
-                  rule: self == oldSelf
+              drain:
+                description: Drain defines node draining parameters for the machine.
+                properties:
+                  timeout:
+                    default: 10m
+                    description: Timeout is the maximum duration to wait for runner
+                      pods to drain before considering the drain stalled.
+                    type: string
+                type: object
               maintenance:
                 description: Maintenance enables maintenance mode, preventing SHARC
                   from uncordoning or powering off this machine.
@@ -126,10 +123,39 @@ spec:
                     - PowerOff
                     type: string
                 type: object
+              nodeName:
+                description: NodeName is the expected Node name in the runner Kubernetes
+                  cluster.
+                type: string
+                x-kubernetes-validations:
+                - message: nodeName is immutable
+                  rule: self == oldSelf
+              nodePoolRef:
+                description: NodePoolRef references the RunnerNodePool this machine
+                  belongs to.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              powerPolicy:
+                default: OnDemand
+                description: PowerPolicy defines the power policy (OnDemand or AlwaysOn).
+                enum:
+                - OnDemand
+                - AlwaysOn
+                type: string
               priority:
-                default: 100
+                default: 0
                 description: Priority specifies selection priority when scaling up
-                  (lower value = higher priority).
+                  (higher value = higher priority).
                 format: int32
                 type: integer
               redfish:
@@ -158,17 +184,24 @@ spec:
                   power:
                     description: Power defines power control options.
                     properties:
-                      forceOffAfter:
-                        default: 0s
-                        description: ForceOffAfter is the duration after which ForceOff
-                          fallback is allowed if graceful shutdown fails. 0s disables
-                          ForceOff fallback.
-                        type: string
-                      shutdownTimeout:
-                        default: 3m
-                        description: ShutdownTimeout is the duration to wait for graceful
-                          shutdown before considering the operation stalled.
-                        type: string
+                      shutdown:
+                        description: Shutdown defines parameters for graceful shutdown
+                          and timeout fallback.
+                        properties:
+                          timeout:
+                            default: 3m
+                            description: Timeout is the duration to wait for graceful
+                              OS shutdown before applying the TimeoutPolicy.
+                            type: string
+                          timeoutPolicy:
+                            default: Abort
+                            description: TimeoutPolicy specifies whether to abort
+                              or force off if graceful shutdown exceeds the timeout.
+                            enum:
+                            - Abort
+                            - ForceOff
+                            type: string
+                        type: object
                     type: object
                   systemID:
                     default: "1"
@@ -219,7 +252,7 @@ spec:
             required:
             - capacity
             - clusterRef
-            - kubernetesNodeName
+            - nodeName
             - redfish
             type: object
           status:
@@ -324,6 +357,11 @@ spec:
                   recorded power state transition.
                 format: date-time
                 type: string
+              observedGeneration:
+                description: ObservedGeneration is the most recent generation observed
+                  for this resource.
+                format: int64
+                type: integer
               operation:
                 description: Operation tracks an in-progress power transition to prevent
                   redundant API calls.

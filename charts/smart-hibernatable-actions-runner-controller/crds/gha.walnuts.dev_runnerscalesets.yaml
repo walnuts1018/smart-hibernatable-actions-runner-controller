@@ -25,9 +25,9 @@ spec:
       jsonPath: .status.scaleSetID
       name: ScaleSetID
       type: integer
-    - description: Desired runners count
-      jsonPath: .status.desiredRunners
-      name: Desired
+    - description: Effective max runners
+      jsonPath: .status.effectiveMaxRunners
+      name: Effective Max
       type: integer
     - description: Active runners count
       jsonPath: .status.activeRunners
@@ -83,7 +83,7 @@ spec:
                   credentialsSecretRef:
                     description: CredentialsSecretRef references the Secret containing
                       GitHub App credentials (github_app_id, github_app_installation_id,
-                      github_app_private_key).
+                      github_app_private_key) or PAT (github_token).
                     properties:
                       name:
                         default: ""
@@ -200,11 +200,6 @@ spec:
                 description: Runner defines the runner pod template and container
                   settings.
                 properties:
-                  containerName:
-                    default: runner
-                    description: ContainerName is the name of the primary runner container
-                      in the pod template.
-                    type: string
                   template:
                     description: Template is the pod template for executing ephemeral
                       runner workloads on the remote cluster.
@@ -8738,10 +8733,6 @@ spec:
                         - containers
                         type: object
                     type: object
-                  workDir:
-                    default: _work
-                    description: WorkDir is the working directory for runner jobs.
-                    type: string
                 required:
                 - template
                 type: object
@@ -8749,9 +8740,9 @@ spec:
                 description: Scaling defines the runner scaling bounds.
                 properties:
                   maxRunners:
-                    default: 2
                     description: MaxRunners is the maximum number of concurrent runner
-                      pods allowed for this scale set.
+                      pods allowed for this scale set. If unset, limited only by NodePool
+                      potential capacity.
                     format: int32
                     minimum: 1
                     type: integer
@@ -8765,7 +8756,7 @@ spec:
                 type: object
                 x-kubernetes-validations:
                 - message: minRunners must be less than or equal to maxRunners
-                  rule: self.minRunners <= self.maxRunners
+                  rule: '!has(self.maxRunners) || self.minRunners <= self.maxRunners'
               suspend:
                 default: false
                 description: Suspend suspends runner scaling and causes the listener
@@ -8845,15 +8836,10 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              desiredRunners:
-                description: DesiredRunners is the calculated target number of ephemeral
-                  runners to satisfy demand.
-                format: int32
-                type: integer
               effectiveMaxRunners:
                 description: EffectiveMaxRunners is the dynamically calculated upper
-                  limit of runners (min of Spec.Scaling.MaxRunners and NodePool capacity,
-                  or 0 if suspended).
+                  limit of runners (min of Spec.Scaling.MaxRunners and NodePool potential
+                  capacity, or 0 if suspended).
                 format: int32
                 type: integer
               github:
@@ -8910,6 +8896,11 @@ spec:
                       running and connected to GitHub Actions.
                     type: boolean
                 type: object
+              observedGeneration:
+                description: ObservedGeneration is the most recent generation observed
+                  for this resource.
+                format: int64
+                type: integer
               scaleSetID:
                 description: ScaleSetID is the numeric ID assigned to this scale set
                   by GitHub Actions.

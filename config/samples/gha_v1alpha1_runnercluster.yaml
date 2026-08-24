@@ -7,6 +7,9 @@ spec:
     name: gha-amd64-kubeconfig
     key: kubeconfig
   runnerNamespace: gha-runners
+  startup:
+    machineRefs:
+      - name: gha-amd64-01
   readiness:
     apiRequestTimeout: 5s
     nodeReadyTimeout: 10m

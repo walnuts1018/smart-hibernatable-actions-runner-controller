@@ -33,6 +33,10 @@ spec:
       jsonPath: .status.readyNodes
       name: Ready Nodes
       type: integer
+    - description: Total runner capacity in pool
+      jsonPath: .status.potentialRunnerCapacity
+      name: Potential Capacity
+      type: integer
     - description: Currently available runner capacity
       jsonPath: .status.readyRunnerCapacity
       name: Ready Capacity
@@ -83,61 +87,24 @@ spec:
                 x-kubernetes-validations:
                 - message: clusterRef is immutable
                   rule: self == oldSelf
-              machineSelector:
-                description: MachineSelector selects RunnerMachine resources that
-                  belong to this pool.
+              drain:
+                description: Drain defines node draining parameters for machines in
+                  the pool.
                 properties:
-                  matchExpressions:
-                    description: matchExpressions is a list of label selector requirements.
-                      The requirements are ANDed.
-                    items:
-                      description: |-
-                        A label selector requirement is a selector that contains values, a key, and an operator that
-                        relates the key and values.
-                      properties:
-                        key:
-                          description: key is the label key that the selector applies
-                            to.
-                          type: string
-                        operator:
-                          description: |-
-                            operator represents a key's relationship to a set of values.
-                            Valid operators are In, NotIn, Exists and DoesNotExist.
-                          type: string
-                        values:
-                          description: |-
-                            values is an array of string values. If the operator is In or NotIn,
-                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
-                            the values array must be empty. This array is replaced during a strategic
-                            merge patch.
-                          items:
-                            type: string
-                          type: array
-                          x-kubernetes-list-type: atomic
-                      required:
-                      - key
-                      - operator
-                      type: object
-                    type: array
-                    x-kubernetes-list-type: atomic
-                  matchLabels:
-                    additionalProperties:
-                      type: string
-                    description: |-
-                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
-                      map is equivalent to an element of matchExpressions, whose key field is "key", the
-                      operator is "In", and the values array contains only "value". The requirements are ANDed.
-                    type: object
+                  timeout:
+                    default: 10m
+                    description: Timeout is the maximum duration to wait for runner
+                      pods to drain before considering the drain stalled.
+                    type: string
                 type: object
-                x-kubernetes-map-type: atomic
               scaling:
                 description: Scaling defines scaling parameters for machines in the
                   pool.
                 properties:
                   maxNodes:
-                    default: 1
                     description: MaxNodes is the maximum number of physical machines
-                      allowed to be powered on.
+                      allowed to be powered on. If unset, all machines in pool are
+                      allowed.
                     format: int32
                     minimum: 1
                     type: integer
@@ -153,20 +120,12 @@ spec:
                     description: ScaleDownDelay is the duration to wait with zero
                       demand before initiating power off.
                     type: string
-                  strategy:
-                    default: Ordered
-                    description: Strategy defines the ordering strategy for scaling
-                      machines.
-                    enum:
-                    - Ordered
-                    type: string
                 type: object
                 x-kubernetes-validations:
                 - message: minNodes must be less than or equal to maxNodes
-                  rule: self.minNodes <= self.maxNodes
+                  rule: '!has(self.maxNodes) || self.minNodes <= self.maxNodes'
             required:
             - clusterRef
-            - machineSelector
             type: object
           status:
             description: RunnerNodePoolStatus defines the observed state of RunnerNodePool.
@@ -278,6 +237,16 @@ spec:
                   dropped to zero across all scale sets.
                 format: date-time
                 type: string
+              observedGeneration:
+                description: ObservedGeneration is the most recent generation observed
+                  for this resource.
+                format: int64
+                type: integer
+              potentialRunnerCapacity:
+                description: PotentialRunnerCapacity is the aggregated runner capacity
+                  across all machines in the pool if powered on.
+                format: int32
+                type: integer
               poweredOnNodes:
                 description: PoweredOnNodes is the number of physical machines currently
                   observed as powered on.
