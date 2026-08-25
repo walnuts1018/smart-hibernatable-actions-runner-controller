@@ -19,11 +19,9 @@ ENV CGO_ENABLED=0 \
     GOARCH=${TARGETARCH}
 
 
-FROM builder AS build-manager
+FROM builder AS build-binaries
 
 RUN --mount=type=bind,source=.,target=/src \
-    --mount=type=cache,id=go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=go-build-${TARGETARCH},target=/root/.cache/go-build \
     go build \
     -buildvcs=false \
     -trimpath \
@@ -31,13 +29,7 @@ RUN --mount=type=bind,source=.,target=/src \
     -tags "netgo,osusergo" \
     -ldflags="-s -w" \
     -o /out/manager \
-    ./cmd/main.go
-
-FROM builder AS build-listener
-
-RUN --mount=type=bind,source=.,target=/src \
-    --mount=type=cache,id=go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=go-build-${TARGETARCH},target=/root/.cache/go-build \
+    ./cmd/main.go && \
     go build \
     -buildvcs=false \
     -trimpath \
@@ -45,13 +37,7 @@ RUN --mount=type=bind,source=.,target=/src \
     -tags "netgo,osusergo" \
     -ldflags="-s -w" \
     -o /out/listener \
-    ./cmd/listener/main.go
-
-FROM builder AS build-runner-hook
-
-RUN --mount=type=bind,source=.,target=/src \
-    --mount=type=cache,id=go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=go-build-${TARGETARCH},target=/root/.cache/go-build \
+    ./cmd/listener/main.go && \
     go build \
     -buildvcs=false \
     -trimpath \
@@ -70,7 +56,7 @@ USER 65532:65532
 FROM static-runtime AS manager
 
 COPY --link \
-    --from=build-manager \
+    --from=build-binaries \
     --chmod=0555 \
     /out/manager \
     /manager
@@ -80,7 +66,7 @@ ENTRYPOINT ["/manager"]
 FROM static-runtime AS listener
 
 COPY --link \
-    --from=build-listener \
+    --from=build-binaries \
     --chmod=0555 \
     /out/listener \
     /listener
@@ -90,7 +76,7 @@ ENTRYPOINT ["/listener"]
 FROM static-runtime AS runner-hook
 
 COPY --link \
-    --from=build-runner-hook \
+    --from=build-binaries \
     --chmod=0555 \
     /out/runner-hook \
     /runner-hook
