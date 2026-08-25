@@ -134,15 +134,51 @@ func (r *EphemeralRunnerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 func (r *EphemeralRunnerReconciler) reconcileDeletion(ctx context.Context, epRunner *ghav1alpha1.EphemeralRunner) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	if controllerutil.ContainsFinalizer(epRunner, runner.FinalizerRunnerCleanup) {
-		// ジョブ実行中 (Busy) で完了未観測の場合はジョブ終了まで待つ
+		var scaleSet ghav1alpha1.RunnerScaleSet
+		var cluster *ghav1alpha1.RunnerCluster
+		var runnerNs string
+
+		hasScaleSet := r.Get(ctx, client.ObjectKey{Namespace: epRunner.Namespace, Name: epRunner.Spec.ScaleSetRef.Name}, &scaleSet) == nil
+		if hasScaleSet {
+			var nodePool ghav1alpha1.RunnerNodePool
+			if err := r.Get(ctx, client.ObjectKey{Namespace: scaleSet.Namespace, Name: scaleSet.Spec.NodePoolRef.Name}, &nodePool); err == nil {
+				var c ghav1alpha1.RunnerCluster
+				if err := r.Get(ctx, client.ObjectKey{Namespace: nodePool.Namespace, Name: nodePool.Spec.ClusterRef.Name}, &c); err == nil {
+					cluster = &c
+					runnerNs = cluster.Spec.RunnerNamespace
+				}
+			}
+		}
+		if runnerNs == "" {
+			runnerNs = runner.DefaultRunnerNamespace
+		}
+
+		// ジョブ実行中 (Busy) で完了未観測の場合はリモート Pod の状態を確認
 		if epRunner.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseBusy && !epRunner.Status.GitHub.CompletedObserved {
-			log.Info("waiting for in-flight job to complete before deleting runner", "runner", epRunner.Name)
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			if cluster != nil {
+				remoteClient, err := r.RemoteProvider.GetClient(ctx, cluster)
+				if err == nil {
+					var pod corev1.Pod
+					podErr := remoteClient.Get(ctx, client.ObjectKey{Namespace: runnerNs, Name: epRunner.Spec.RunnerName}, &pod)
+					if podErr == nil {
+						obs := observeRunnerPod(&pod)
+						if obs.State == podStartupRunning {
+							log.Info("waiting for in-flight job to complete on remote pod before deleting runner", "runner", epRunner.Name)
+							return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+						}
+						log.Info("remote runner pod has finished during deletion reconciliation", "runner", epRunner.Name, "state", obs.State)
+					} else if !apierrors.IsNotFound(podErr) {
+						log.Error(podErr, "transient error reading remote pod during deletion, retrying", "runner", epRunner.Name)
+						return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+					} else {
+						log.Info("remote runner pod not found during deletion reconciliation", "runner", epRunner.Name)
+					}
+				}
+			}
 		}
 
 		log.Info("cleaning up resources for runner", "runner", epRunner.Name)
-		var scaleSet ghav1alpha1.RunnerScaleSet
-		if err := r.Get(ctx, client.ObjectKey{Namespace: epRunner.Namespace, Name: epRunner.Spec.ScaleSetRef.Name}, &scaleSet); err == nil {
+		if hasScaleSet {
 			// 1. GitHub Actions 上の Runner 登録を解除 (Scale-down 時の孤立防止)
 			runnerID := int64(0)
 			if epRunner.Status.Provisioning != nil && epRunner.Status.Provisioning.RunnerID != 0 {
@@ -161,17 +197,9 @@ func (r *EphemeralRunnerReconciler) reconcileDeletion(ctx context.Context, epRun
 			}
 
 			// 2. リモートクラスタの Pod/Secret をクリーンアップ
-			var nodePool ghav1alpha1.RunnerNodePool
-			if err := r.Get(ctx, client.ObjectKey{Namespace: scaleSet.Namespace, Name: scaleSet.Spec.NodePoolRef.Name}, &nodePool); err == nil {
-				var cluster ghav1alpha1.RunnerCluster
-				if err := r.Get(ctx, client.ObjectKey{Namespace: nodePool.Namespace, Name: nodePool.Spec.ClusterRef.Name}, &cluster); err == nil {
-					runnerNs := cluster.Spec.RunnerNamespace
-					if runnerNs == "" {
-						runnerNs = runner.DefaultRunnerNamespace
-					}
-					if cleanupErr := r.cleanupRemoteResources(ctx, &cluster, runnerNs, epRunner); cleanupErr != nil {
-						log.Error(cleanupErr, "failed to cleanup remote resources during deletion")
-					}
+			if cluster != nil {
+				if cleanupErr := r.cleanupRemoteResources(ctx, cluster, runnerNs, epRunner); cleanupErr != nil {
+					log.Error(cleanupErr, "failed to cleanup remote resources during deletion")
 				}
 			}
 		}

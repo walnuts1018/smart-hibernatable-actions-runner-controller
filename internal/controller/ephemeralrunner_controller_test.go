@@ -874,3 +874,197 @@ func TestEphemeralRunnerReconciler_PodScheduledWithEmptyReason(t *testing.T) {
 		t.Errorf("expected PodScheduled condition on EphemeralRunner")
 	}
 }
+
+func TestEphemeralRunnerReconciler_DeleteBusyRunner_PodNotFound(t *testing.T) {
+	scheme := runtime.NewScheme()
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
+
+	cluster := &ghav1alpha1.RunnerCluster{
+		Name: "c1", Namespace: "default",
+		Spec: ghav1alpha1.RunnerClusterSpec{
+			RunnerNamespace: "gha-runners",
+		},
+		Status: ghav1alpha1.RunnerClusterStatus{
+			Phase:        ghav1alpha1.RunnerClusterPhaseReady,
+			APIReachable: true,
+		},
+	}
+
+	nodePool := &ghav1alpha1.RunnerNodePool{
+		Name: "p1", Namespace: "default",
+		Spec: ghav1alpha1.RunnerNodePoolSpec{
+			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
+		},
+	}
+
+	scaleSet := &ghav1alpha1.RunnerScaleSet{
+		Name: "ss1", Namespace: "default",
+		Spec: ghav1alpha1.RunnerScaleSetSpec{
+			NodePoolRef: corev1.LocalObjectReference{Name: "p1"},
+		},
+	}
+
+	now := metav1.Now()
+	epRunner := &ghav1alpha1.EphemeralRunner{
+		Name:              "ss1-runner-busy-deleted",
+		Namespace:         "default",
+		Finalizers:        []string{runner.FinalizerRunnerCleanup},
+		DeletionTimestamp: &now,
+		Spec: ghav1alpha1.EphemeralRunnerSpec{
+			ScaleSetRef: corev1.LocalObjectReference{Name: "ss1"},
+			RunnerName:  "ss1-runner-busy-deleted",
+		},
+		Status: ghav1alpha1.EphemeralRunnerStatus{
+			Phase: ghav1alpha1.EphemeralRunnerPhaseBusy,
+			GitHub: ghav1alpha1.GitHubRunnerStatus{
+				RunnerID:          1234,
+				CompletedObserved: false,
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cluster, nodePool, scaleSet, epRunner).
+		WithStatusSubresource(epRunner).
+		Build()
+
+	remoteClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		Build() // Remote pod does not exist (NotFound)
+
+	r := &EphemeralRunnerReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RemoteProvider: &fakeRemoteProvider{client: remoteClient},
+	}
+
+	// Reconcile: Because remote pod is NotFound, finalizer should be removed immediately without getting stuck in infinite loop
+	res, err := r.Reconcile(context.Background(), ctrl.Request{
+		Namespace: "default", Name: "ss1-runner-busy-deleted",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.RequeueAfter != 0 {
+		t.Errorf("expected immediate completion (RequeueAfter: 0), got %v", res.RequeueAfter)
+	}
+
+	var updatedRunner ghav1alpha1.EphemeralRunner
+	err = fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "ss1-runner-busy-deleted"}, &updatedRunner)
+	if err == nil {
+		if len(updatedRunner.Finalizers) != 0 {
+			t.Errorf("expected finalizers to be empty, got %v", updatedRunner.Finalizers)
+		}
+	}
+}
+
+func TestEphemeralRunnerReconciler_DeleteBusyRunner_PodStillRunning(t *testing.T) {
+	scheme := runtime.NewScheme()
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
+
+	cluster := &ghav1alpha1.RunnerCluster{
+		Name: "c1", Namespace: "default",
+		Spec: ghav1alpha1.RunnerClusterSpec{
+			RunnerNamespace: "gha-runners",
+		},
+		Status: ghav1alpha1.RunnerClusterStatus{
+			Phase:        ghav1alpha1.RunnerClusterPhaseReady,
+			APIReachable: true,
+		},
+	}
+
+	nodePool := &ghav1alpha1.RunnerNodePool{
+		Name: "p1", Namespace: "default",
+		Spec: ghav1alpha1.RunnerNodePoolSpec{
+			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
+		},
+	}
+
+	scaleSet := &ghav1alpha1.RunnerScaleSet{
+		Name: "ss1", Namespace: "default",
+		Spec: ghav1alpha1.RunnerScaleSetSpec{
+			NodePoolRef: corev1.LocalObjectReference{Name: "p1"},
+		},
+	}
+
+	now := metav1.Now()
+	epRunner := &ghav1alpha1.EphemeralRunner{
+		Name:              "ss1-runner-busy-running",
+		Namespace:         "default",
+		Finalizers:        []string{runner.FinalizerRunnerCleanup},
+		DeletionTimestamp: &now,
+		Spec: ghav1alpha1.EphemeralRunnerSpec{
+			ScaleSetRef: corev1.LocalObjectReference{Name: "ss1"},
+			RunnerName:  "ss1-runner-busy-running",
+		},
+		Status: ghav1alpha1.EphemeralRunnerStatus{
+			Phase: ghav1alpha1.EphemeralRunnerPhaseBusy,
+			GitHub: ghav1alpha1.GitHubRunnerStatus{
+				RunnerID:          1234,
+				CompletedObserved: false,
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cluster, nodePool, scaleSet, epRunner).
+		WithStatusSubresource(epRunner).
+		Build()
+
+	runningPod := &corev1.Pod{
+		Name:      "ss1-runner-busy-running",
+		Namespace: "gha-runners",
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+		},
+	}
+
+	remoteClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(runningPod).
+		Build()
+
+	r := &EphemeralRunnerReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RemoteProvider: &fakeRemoteProvider{client: remoteClient},
+	}
+
+	// Reconcile: Remote pod is actively running, so it should requeue after 5 seconds to let the job finish
+	res, err := r.Reconcile(context.Background(), ctrl.Request{
+		Namespace: "default", Name: "ss1-runner-busy-running",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.RequeueAfter != 5*time.Second {
+		t.Errorf("expected RequeueAfter: 5s while pod is running, got %v", res.RequeueAfter)
+	}
+
+	// Pod finishes
+	runningPod.Status.Phase = corev1.PodSucceeded
+	if err := remoteClient.Status().Update(context.Background(), runningPod); err != nil {
+		t.Fatalf("failed to update pod status: %v", err)
+	}
+
+	// Next Reconcile: Pod succeeded, finalizer should now be removed
+	res, err = r.Reconcile(context.Background(), ctrl.Request{
+		Namespace: "default", Name: "ss1-runner-busy-running",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.RequeueAfter != 0 {
+		t.Errorf("expected RequeueAfter: 0 after pod succeeded, got %v", res.RequeueAfter)
+	}
+
+	var updatedRunner ghav1alpha1.EphemeralRunner
+	err = fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "ss1-runner-busy-running"}, &updatedRunner)
+	if err == nil && len(updatedRunner.Finalizers) != 0 {
+		t.Errorf("expected finalizer to be removed, got %v", updatedRunner.Finalizers)
+	}
+}
