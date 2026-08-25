@@ -29,14 +29,14 @@ target "_common" {
   cache-from = [
     "type=gha,scope=build-${ARCH_KEY}"
   ]
-  cache-to = [
-    "type=gha,mode=max,scope=build-${ARCH_KEY},ignore-error=true"
-  ]
 }
 
 target "manager" {
   inherits = ["_common"]
   target   = "manager"
+  cache-to = [
+    "type=gha,mode=max,scope=build-${ARCH_KEY},ignore-error=true"
+  ]
   output = [
     "type=image,name=${REGISTRY}/${REPO}/manager,push-by-digest=true,name-canonical=true,push=true,compression=zstd"
   ]
