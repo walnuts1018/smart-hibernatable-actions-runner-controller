@@ -89,7 +89,7 @@ func TestEphemeralRunnerSetReconciler_ScaleUpAndDown(t *testing.T) {
 	}
 }
 
-func TestEphemeralRunnerSetReconciler_ScaleDownWithStartingRunner(t *testing.T) {
+func TestEphemeralRunnerSetReconciler_ScaleDownWithBusyRunner(t *testing.T) {
 	scheme := runtime.NewScheme()
 	clientgoscheme.AddToScheme(scheme)
 	ghav1alpha1.AddToScheme(scheme)
@@ -113,7 +113,20 @@ func TestEphemeralRunnerSetReconciler_ScaleDownWithStartingRunner(t *testing.T) 
 		},
 	}
 
-	// Starting 状態の Runner (まだスケールダウン対象外)
+	// Busy 状態の Runner (ジョブ実行中のためスケールダウンで即座に削除されない)
+	busyRunner := &ghav1alpha1.EphemeralRunner{
+		Name:      "test-ss-busy",
+		Namespace: "default",
+		Spec: ghav1alpha1.EphemeralRunnerSpec{
+			ScaleSetRef: corev1.LocalObjectReference{Name: "test-ss"},
+			RunnerName:  "test-ss-busy",
+		},
+		Status: ghav1alpha1.EphemeralRunnerStatus{
+			Phase: ghav1alpha1.EphemeralRunnerPhaseBusy,
+		},
+	}
+
+	// Starting 状態の Runner (ジョブ未実行のためスケールダウンで削除される)
 	startingRunner := &ghav1alpha1.EphemeralRunner{
 		Name:      "test-ss-starting",
 		Namespace: "default",
@@ -127,8 +140,8 @@ func TestEphemeralRunnerSetReconciler_ScaleDownWithStartingRunner(t *testing.T) 
 	}
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).
-		WithObjects(ers, startingRunner).
-		WithStatusSubresource(ers, startingRunner).
+		WithObjects(ers, busyRunner, startingRunner).
+		WithStatusSubresource(ers, busyRunner, startingRunner).
 		WithIndex(&ghav1alpha1.EphemeralRunner{}, IndexScaleSetRefName, func(obj client.Object) []string {
 			er, ok := obj.(*ghav1alpha1.EphemeralRunner)
 			if !ok || er.Spec.ScaleSetRef.Name == "" {
@@ -143,7 +156,7 @@ func TestEphemeralRunnerSetReconciler_ScaleDownWithStartingRunner(t *testing.T) 
 		Scheme: scheme,
 	}
 
-	// 1. Reconcile: startingRunner は削除されず、RequeueAfter: 5s が返る
+	// 1. Reconcile: startingRunner は削除されるが busyRunner は保持され、RequeueAfter: 5s が返る
 	res, err := r.Reconcile(context.Background(), ctrl.Request{
 		Namespace: "default", Name: "test-ss",
 	})
@@ -159,31 +172,9 @@ func TestEphemeralRunnerSetReconciler_ScaleDownWithStartingRunner(t *testing.T) 
 		t.Fatalf("failed to list runners: %v", err)
 	}
 	if len(runners.Items) != 1 {
-		t.Fatalf("expected 1 runner still present while starting, got %d", len(runners.Items))
+		t.Fatalf("expected exactly 1 runner (busyRunner) still present, got %d", len(runners.Items))
 	}
-
-	// 2. Runner が Idle に遷移
-	var currentRunner ghav1alpha1.EphemeralRunner
-	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-ss-starting"}, &currentRunner); err != nil {
-		t.Fatalf("failed to get runner: %v", err)
-	}
-	currentRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseIdle
-	if err := fakeClient.Status().Update(context.Background(), &currentRunner); err != nil {
-		t.Fatalf("failed to update runner status to Idle: %v", err)
-	}
-
-	// 3. 再度 Reconcile: Idle になったため削除される
-	res, err = r.Reconcile(context.Background(), ctrl.Request{
-		Namespace: "default", Name: "test-ss",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if err := fakeClient.List(context.Background(), &runners, client.InNamespace("default")); err != nil {
-		t.Fatalf("failed to list runners: %v", err)
-	}
-	if len(runners.Items) != 0 {
-		t.Fatalf("expected 0 runners after Idle runner scaled down, got %d", len(runners.Items))
+	if runners.Items[0].Name != "test-ss-busy" {
+		t.Errorf("expected test-ss-busy to remain, got %s", runners.Items[0].Name)
 	}
 }

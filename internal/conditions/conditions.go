@@ -107,6 +107,13 @@ func SetConditionWithGeneration(conditions *[]metav1.Condition, generation int64
 	if conditions == nil {
 		return
 	}
+	if reason == "" {
+		if status == metav1.ConditionTrue {
+			reason = ReasonReady
+		} else {
+			reason = ReasonPending
+		}
+	}
 	meta.SetStatusCondition(conditions, metav1.Condition{
 		Type:               conditionType,
 		Status:             status,

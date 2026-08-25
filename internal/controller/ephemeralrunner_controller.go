@@ -656,7 +656,15 @@ func (r *EphemeralRunnerReconciler) applyPodStatus(epRunner *ghav1alpha1.Ephemer
 	// Propagate Kubernetes PodScheduled condition
 	for _, cond := range pod.Status.Conditions {
 		if cond.Type == corev1.PodScheduled {
-			conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypePodScheduled, metav1.ConditionStatus(cond.Status), cond.Reason, cond.Message)
+			reason := cond.Reason
+			if reason == "" {
+				if cond.Status == corev1.ConditionTrue {
+					reason = conditions.ReasonScheduled
+				} else {
+					reason = conditions.ReasonPending
+				}
+			}
+			conditions.SetCondition(&epRunner.Status.Conditions, conditions.TypePodScheduled, metav1.ConditionStatus(cond.Status), reason, cond.Message)
 		}
 	}
 

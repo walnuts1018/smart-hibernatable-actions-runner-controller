@@ -766,3 +766,111 @@ func TestEphemeralRunnerReconciler_PodCompletedTTL(t *testing.T) {
 		t.Errorf("expected expired Completed runner CR to be deleted")
 	}
 }
+
+func TestEphemeralRunnerReconciler_PodScheduledWithEmptyReason(t *testing.T) {
+	scheme := runtime.NewScheme()
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
+
+	cluster := &ghav1alpha1.RunnerCluster{
+		Name: "c1", Namespace: "default",
+		Spec: ghav1alpha1.RunnerClusterSpec{
+			RunnerNamespace: "gha-runners",
+		},
+		Status: ghav1alpha1.RunnerClusterStatus{
+			Phase:        ghav1alpha1.RunnerClusterPhaseReady,
+			APIReachable: true,
+		},
+	}
+
+	nodePool := &ghav1alpha1.RunnerNodePool{
+		Name: "p1", Namespace: "default",
+		Spec: ghav1alpha1.RunnerNodePoolSpec{
+			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
+		},
+		Status: ghav1alpha1.RunnerNodePoolStatus{
+			ReadyNodes: 1,
+		},
+	}
+
+	scaleSet := &ghav1alpha1.RunnerScaleSet{
+		Name: "ss1", Namespace: "default",
+		Spec: ghav1alpha1.RunnerScaleSetSpec{
+			NodePoolRef: corev1.LocalObjectReference{Name: "p1"},
+		},
+	}
+
+	epRunner := &ghav1alpha1.EphemeralRunner{
+		Name:       "ss1-runner-running",
+		Namespace:  "default",
+		Finalizers: []string{runner.FinalizerRunnerCleanup},
+		Spec: ghav1alpha1.EphemeralRunnerSpec{
+			ScaleSetRef: corev1.LocalObjectReference{Name: "ss1"},
+			RunnerName:  "ss1-runner-running",
+		},
+		Status: ghav1alpha1.EphemeralRunnerStatus{
+			Phase: ghav1alpha1.EphemeralRunnerPhaseStarting,
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cluster, nodePool, scaleSet, epRunner).
+		WithStatusSubresource(epRunner).
+		Build()
+
+	runningPod := &corev1.Pod{
+		Name:      "ss1-runner-running",
+		Namespace: "gha-runners",
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			Conditions: []corev1.PodCondition{
+				{
+					Type:   corev1.PodScheduled,
+					Status: corev1.ConditionTrue,
+					Reason: "", // Standard K8s empty reason on success
+				},
+			},
+		},
+	}
+
+	remoteClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(runningPod).
+		Build()
+
+	r := &EphemeralRunnerReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RemoteProvider: &fakeRemoteProvider{client: remoteClient},
+	}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		Namespace: "default", Name: "ss1-runner-running",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var updatedRunner ghav1alpha1.EphemeralRunner
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "ss1-runner-running"}, &updatedRunner); err != nil {
+		t.Fatalf("failed to get runner: %v", err)
+	}
+
+	if updatedRunner.Status.Phase != ghav1alpha1.EphemeralRunnerPhaseIdle {
+		t.Errorf("expected phase Idle, got %s", updatedRunner.Status.Phase)
+	}
+
+	var foundScheduledCond bool
+	for _, cond := range updatedRunner.Status.Conditions {
+		if cond.Type == "PodScheduled" {
+			foundScheduledCond = true
+			if cond.Reason == "" {
+				t.Errorf("PodScheduled condition reason must not be empty")
+			}
+		}
+	}
+	if !foundScheduledCond {
+		t.Errorf("expected PodScheduled condition on EphemeralRunner")
+	}
+}

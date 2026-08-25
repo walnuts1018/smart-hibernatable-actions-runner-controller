@@ -122,7 +122,10 @@ func (r *EphemeralRunnerSetReconciler) Reconcile(ctx context.Context, req ctrl.R
 			}
 			if run.DeletionTimestamp.IsZero() && (run.Status.Phase == ghav1alpha1.EphemeralRunnerPhasePending ||
 				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseWaitingForCluster ||
-				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseIdle) {
+				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseProvisioning ||
+				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseStarting ||
+				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseIdle ||
+				run.Status.Phase == "") {
 				if err := r.Delete(ctx, run); err != nil {
 					log.Error(err, "failed to delete EphemeralRunner for scale-down", "runner", run.Name)
 				} else {
