@@ -169,17 +169,24 @@ func (r *RunnerMachineReconciler) observeRedfish(ctx context.Context, machine *g
 	}
 
 	r.recordRedfishSuccess(machine, time.Now())
-	if machine.Status.PowerState != state {
-		now := metav1.Now()
-		machine.Status.LastPowerTransitionTime = &now
-		machine.Status.PowerState = state
-	}
 
-	// 電源状態が目標と一致したらOperationをクリア
-	if machine.Status.Operation != nil {
-		if machine.Status.PowerState == ghav1alpha1.PowerStateOn && machine.Status.Operation.Type == ghav1alpha1.PowerOperationTypePowerOn {
+	if machine.Status.Operation != nil && (machine.Status.Operation.Type == ghav1alpha1.PowerOperationTypeGracefulShutdown || machine.Status.Operation.Type == ghav1alpha1.PowerOperationTypeForceOff) {
+		if state == ghav1alpha1.PowerStateOff {
+			now := metav1.Now()
+			machine.Status.LastPowerTransitionTime = &now
+			machine.Status.PowerState = ghav1alpha1.PowerStateOff
 			machine.Status.Operation = nil
-		} else if machine.Status.PowerState == ghav1alpha1.PowerStateOff && (machine.Status.Operation.Type == ghav1alpha1.PowerOperationTypeGracefulShutdown || machine.Status.Operation.Type == ghav1alpha1.PowerOperationTypeForceOff) {
+		} else {
+			// シャットダウン操作中（BMCがまだOnの場合）はコントローラー上の状態としてPoweringOffを維持
+			machine.Status.PowerState = ghav1alpha1.PowerStatePoweringOff
+		}
+	} else {
+		if machine.Status.PowerState != state {
+			now := metav1.Now()
+			machine.Status.LastPowerTransitionTime = &now
+			machine.Status.PowerState = state
+		}
+		if machine.Status.Operation != nil && machine.Status.PowerState == ghav1alpha1.PowerStateOn && machine.Status.Operation.Type == ghav1alpha1.PowerOperationTypePowerOn {
 			machine.Status.Operation = nil
 		}
 	}
@@ -418,8 +425,27 @@ func (r *RunnerMachineReconciler) reconcileActive(
 	// 1. Shutdown Commit Point以降の方向転換保護: シャットダウン処理中の場合はまずOffになるのを待つ
 	if m.Status.Operation != nil && (m.Status.Operation.Type == ghav1alpha1.PowerOperationTypeGracefulShutdown || m.Status.Operation.Type == ghav1alpha1.PowerOperationTypeForceOff) {
 		if m.Status.PowerState != ghav1alpha1.PowerStateOff {
-			log.Info("waiting for in-flight shutdown to complete before restarting machine", "machine", m.Name, "operation", m.Status.Operation.Type)
-			return 5 * time.Second
+			shutdownTimeout := 3 * time.Minute
+			if m.Spec.Redfish.Power.Shutdown.Timeout != nil && m.Spec.Redfish.Power.Shutdown.Timeout.Duration > 0 {
+				shutdownTimeout = m.Spec.Redfish.Power.Shutdown.Timeout.Duration
+			}
+			timeoutPolicy := ghav1alpha1.RedfishTimeoutPolicyAbort
+			if m.Spec.Redfish.Power.Shutdown.TimeoutPolicy != "" {
+				timeoutPolicy = m.Spec.Redfish.Power.Shutdown.TimeoutPolicy
+			}
+
+			if !m.Status.Operation.StartedAt.IsZero() && time.Since(m.Status.Operation.StartedAt.Time) > shutdownTimeout {
+				log.Info("in-flight shutdown exceeded timeout during active reconciliation", "machine", m.Name, "policy", timeoutPolicy)
+				r.handleShutdownTimeout(ctx, m, pwrCtrl, shutdownTimeout, timeoutPolicy)
+				if m.Status.Operation == nil {
+					// Abort policy cleared the operation, continue active reconciliation
+				} else if m.Status.PowerState != ghav1alpha1.PowerStateOff {
+					return 5 * time.Second
+				}
+			} else {
+				log.Info("waiting for in-flight shutdown to complete before restarting machine", "machine", m.Name, "operation", m.Status.Operation.Type)
+				return 5 * time.Second
+			}
 		}
 		// OffになったらOperationをクリアしてPowerOnへ進む
 		m.Status.Operation = nil
@@ -574,8 +600,8 @@ func (r *RunnerMachineReconciler) reconcileOff(
 		timeoutPolicy = m.Spec.Redfish.Power.Shutdown.TimeoutPolicy
 	}
 
-	// 2. シャットダウン中 (PoweringOff) のタイムアウト・ForceOff判定
-	if m.Status.PowerState == ghav1alpha1.PowerStatePoweringOff {
+	// 2. シャットダウン操作中 (Operation == GracefulShutdown / ForceOff または PoweringOff) のタイムアウト・ForceOff判定
+	if (m.Status.Operation != nil && (m.Status.Operation.Type == ghav1alpha1.PowerOperationTypeGracefulShutdown || m.Status.Operation.Type == ghav1alpha1.PowerOperationTypeForceOff)) || m.Status.PowerState == ghav1alpha1.PowerStatePoweringOff {
 		r.handleShutdownTimeout(ctx, m, pwrCtrl, shutdownTimeout, timeoutPolicy)
 		return 10 * time.Second
 	}
@@ -671,10 +697,16 @@ func (r *RunnerMachineReconciler) handleShutdownTimeout(
 	timeoutPolicy ghav1alpha1.RedfishTimeoutPolicy,
 ) {
 	log := logf.FromContext(ctx)
-	if m.Status.LastPowerTransitionTime == nil {
+	var startedAt time.Time
+	if m.Status.Operation != nil && !m.Status.Operation.StartedAt.IsZero() {
+		startedAt = m.Status.Operation.StartedAt.Time
+	} else if m.Status.LastPowerTransitionTime != nil {
+		startedAt = m.Status.LastPowerTransitionTime.Time
+	} else {
 		return
 	}
-	elapsed := time.Since(m.Status.LastPowerTransitionTime.Time)
+
+	elapsed := time.Since(startedAt)
 	if elapsed <= shutdownTimeout {
 		return
 	}
@@ -690,7 +722,8 @@ func (r *RunnerMachineReconciler) handleShutdownTimeout(
 		return
 	}
 
-	if timeoutPolicy == ghav1alpha1.RedfishTimeoutPolicyForceOff {
+	switch timeoutPolicy {
+	case ghav1alpha1.RedfishTimeoutPolicyForceOff:
 		// 30秒以内の重複ForceOffを抑止
 		if op.Type == ghav1alpha1.PowerOperationTypeForceOff && time.Since(op.LastAttemptAt.Time) < 30*time.Second {
 			return
@@ -712,6 +745,9 @@ func (r *RunnerMachineReconciler) handleShutdownTimeout(
 				metrics.PowerTransitionsTotal.WithLabelValues(m.Namespace, m.Name, "ForceOff").Inc(ctx)
 			}
 		}
+	case ghav1alpha1.RedfishTimeoutPolicyAbort:
+		log.Info("graceful shutdown timed out, abort policy applied; clearing operation", "machine", m.Name)
+		m.Status.Operation = nil
 	}
 }
 
@@ -741,6 +777,7 @@ func (r *RunnerMachineReconciler) initiateGracefulShutdown(
 			if r.Recorder != nil {
 				r.Recorder.Eventf(m, nil, corev1.EventTypeWarning, "GracefulShutdownFailed", "PowerOff", "Failed to gracefully shutdown machine %s: %v", m.Name, err)
 			}
+			m.Status.Operation = nil
 		} else {
 			m.Status.PowerState = ghav1alpha1.PowerStatePoweringOff
 			nowTrans := metav1.Now()

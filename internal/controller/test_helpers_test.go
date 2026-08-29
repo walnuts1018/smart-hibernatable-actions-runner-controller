@@ -112,6 +112,7 @@ type fakePowerController struct {
 	powerState     ghav1alpha1.PowerState
 	powerOnCalled  bool
 	shutdownCalled bool
+	shutdownErr    error
 	forceOffCalled bool
 }
 
@@ -127,6 +128,9 @@ func (f *fakePowerController) PowerOn(ctx context.Context) error {
 
 func (f *fakePowerController) GracefulShutdown(ctx context.Context) error {
 	f.shutdownCalled = true
+	if f.shutdownErr != nil {
+		return f.shutdownErr
+	}
 	f.powerState = ghav1alpha1.PowerStatePoweringOff
 	return nil
 }

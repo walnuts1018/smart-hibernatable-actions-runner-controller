@@ -213,36 +213,50 @@ func (c *gofishController) withSystem(ctx context.Context, fn func(sys *schemas.
 		return ctx.Err()
 	}
 
-	base, err := c.getOrCreateClient(ctx)
-	if err != nil {
-		return err
+	execute := func() error {
+		base, err := c.getOrCreateClient(ctx)
+		if err != nil {
+			return err
+		}
+
+		// Bind request Context
+		client := base.WithContext(ctx)
+
+		service := client.GetService()
+		if service == nil {
+			c.invalidateClient()
+			return fmt.Errorf("failed to get Redfish service root")
+		}
+
+		systems, err := service.Systems()
+		if err != nil {
+			c.invalidateClient()
+			return fmt.Errorf("failed to list systems from Redfish: %w", err)
+		}
+
+		if len(systems) == 0 {
+			return fmt.Errorf("redfish endpoint exposes no computer systems")
+		}
+
+		targetSystem, err := resolveSystem(systems, c.spec.SystemID)
+		if err != nil {
+			return err
+		}
+
+		if fnErr := fn(targetSystem); fnErr != nil {
+			c.invalidateClient()
+			return fnErr
+		}
+		return nil
 	}
 
-	// Bind request Context
-	client := base.WithContext(ctx)
-
-	service := client.GetService()
-	if service == nil {
+	err := execute()
+	if err != nil && isNetworkOrEOFError(err) {
+		// アイドル切断やコネクション断の場合、1回だけ新規コネクションで再試行
 		c.invalidateClient()
-		return fmt.Errorf("failed to get Redfish service root")
+		err = execute()
 	}
-
-	systems, err := service.Systems()
-	if err != nil {
-		c.invalidateClient()
-		return fmt.Errorf("failed to list systems from Redfish: %w", err)
-	}
-
-	if len(systems) == 0 {
-		return fmt.Errorf("redfish endpoint exposes no computer systems")
-	}
-
-	targetSystem, err := resolveSystem(systems, c.spec.SystemID)
-	if err != nil {
-		return err
-	}
-
-	return fn(targetSystem)
+	return err
 }
 
 func recordRedfishMetric(ctx context.Context, operation string, startTime time.Time, err error) {
@@ -361,6 +375,14 @@ func (c *gofishController) GracefulShutdown(ctx context.Context) error {
 		if len(supportedTypes) > 0 {
 			if hasGraceful {
 				_, err := sys.Reset(schemas.GracefulShutdownResetType)
+				if err == nil {
+					return nil
+				}
+				if hasPushButton {
+					if _, pushErr := sys.Reset(schemas.PushPowerButtonResetType); pushErr == nil {
+						return nil
+					}
+				}
 				return err
 			}
 			if hasPushButton {
@@ -370,12 +392,12 @@ func (c *gofishController) GracefulShutdown(ctx context.Context) error {
 			return fmt.Errorf("neither GracefulShutdown nor PushPowerButton supported by BMC (supported: %v)", supportedTypes)
 		}
 
-		// When supportedTypes is unknown, try GracefulShutdown and fallback to PushPowerButton only if explicitly unsupported
+		// When supportedTypes is unknown, try GracefulShutdown and fallback to PushPowerButton
 		_, err := sys.Reset(schemas.GracefulShutdownResetType)
 		if err == nil {
 			return nil
 		}
-		if isUnsupportedResetError(err) {
+		if isUnsupportedResetError(err) || isNetworkOrEOFError(err) {
 			_, pushErr := sys.Reset(schemas.PushPowerButtonResetType)
 			if pushErr == nil {
 				return nil
@@ -473,4 +495,16 @@ func isUnsupportedResetError(err error) bool {
 		strings.Contains(msg, "actionparameternotsupported") ||
 		strings.Contains(msg, "actionnotsupported") ||
 		strings.Contains(msg, "propertyvaluenotinlist")
+}
+
+func isNetworkOrEOFError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "timeout")
 }
