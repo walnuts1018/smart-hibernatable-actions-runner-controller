@@ -91,44 +91,34 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
+	hasReconcileError := false
+
 	// 2. GitHub ScaleSet の同期
 	if err := r.reconcileGitHub(ctx, &scaleSet); err != nil {
 		log.Error(err, "failed to reconcile GitHub ScaleSet")
-		if updateErr := r.updateStatus(ctx, &scaleSet, origScaleSet); updateErr != nil {
-			log.Error(updateErr, "failed to update status")
-		}
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		hasReconcileError = true
 	}
 
 	// 3. CapacityLimit / EffectiveMaxRunners の計算
 	if _, err := r.reconcileCapacity(ctx, &scaleSet); err != nil {
 		log.Error(err, "failed to reconcile capacity")
-		if updateErr := r.updateStatus(ctx, &scaleSet, origScaleSet); updateErr != nil {
-			log.Error(updateErr, "failed to update status")
-		}
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		hasReconcileError = true
 	}
 
 	// 4. Listener 関連リソースの Server-Side Apply
 	if err := r.reconcileListener(ctx, &scaleSet); err != nil {
 		log.Error(err, "failed to reconcile listener resources")
-		if updateErr := r.updateStatus(ctx, &scaleSet, origScaleSet); updateErr != nil {
-			log.Error(updateErr, "failed to update status")
-		}
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		hasReconcileError = true
 	}
 
 	// 5. EphemeralRunnerSet リソースの同期
 	if err := r.reconcileEphemeralRunnerSet(ctx, &scaleSet); err != nil {
 		log.Error(err, "failed to reconcile ephemeral runner set")
-		if updateErr := r.updateStatus(ctx, &scaleSet, origScaleSet); updateErr != nil {
-			log.Error(updateErr, "failed to update status")
-		}
-		return ctrl.Result{}, err
+		hasReconcileError = true
 	}
 
 	// 6. 全体 Ready Condition の更新
-	if scaleSet.Status.GitHub.AssignedJobs >= 0 && scaleSet.Status.Listener.Ready {
+	if scaleSet.Status.GitHub.AssignedJobs >= 0 && scaleSet.Status.Listener.Ready && scaleSet.Status.ScaleSetID > 0 {
 		conditions.SetConditionWithGeneration(&scaleSet.Status.Conditions, scaleSet.Generation, conditions.TypeReady, metav1.ConditionTrue, conditions.ReasonReady, "ScaleSet is operational")
 	} else {
 		conditions.SetConditionWithGeneration(&scaleSet.Status.Conditions, scaleSet.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, "ScaleSet is initializing")
@@ -141,6 +131,10 @@ func (r *RunnerScaleSetReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	metrics.EffectiveMaxRunners.WithLabelValues(scaleSet.Namespace, scaleSet.Name).Set(float64(scaleSet.Status.EffectiveMaxRunners))
+
+	if hasReconcileError {
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
 
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }

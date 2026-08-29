@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -13,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
+	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/conditions"
 	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/runner"
 )
 
@@ -299,5 +301,100 @@ func TestRunnerScaleSetReconciler_ListenerCustomization(t *testing.T) {
 	}
 	if !foundExtraEnv {
 		t.Errorf("expected EXTRA_ENV=extra_val in container env, got %v", c.Env)
+	}
+}
+
+func TestRunnerScaleSetReconciler_GitHubSyncFailure(t *testing.T) {
+	scheme := runtime.NewScheme()
+	clientgoscheme.AddToScheme(scheme)
+	ghav1alpha1.AddToScheme(scheme)
+
+	secret := &corev1.Secret{
+		Name:      "github-app-secret",
+		Namespace: "default",
+		Data: map[string][]byte{
+			"github_app_id":              []byte("12345"),
+			"github_app_installation_id": []byte("67890"),
+			"github_app_private_key":     []byte(validTestRSAPrivateKeyPEM),
+		},
+	}
+
+	nodePool := &ghav1alpha1.RunnerNodePool{
+		Name:      "pool1",
+		Namespace: "default",
+	}
+
+	two := int32(2)
+	scaleSet := &ghav1alpha1.RunnerScaleSet{
+		Name:       "test-gh-fail",
+		Namespace:  "default",
+		Finalizers: []string{runner.FinalizerScaleSetCleanup},
+		Spec: ghav1alpha1.RunnerScaleSetSpec{
+			GitHub: ghav1alpha1.GitHubScaleSetSpec{
+				ConfigURL:            "https://github.com/example-org",
+				ScaleSetName:         "test-gh-fail",
+				CredentialsSecretRef: corev1.LocalObjectReference{Name: "github-app-secret"},
+			},
+			NodePoolRef: corev1.LocalObjectReference{Name: "pool1"},
+			Scaling: ghav1alpha1.RunnerScaleSetScalingSpec{
+				MinRunners: 0,
+				MaxRunners: &two,
+			},
+			Runner: ghav1alpha1.RunnerTemplateSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{Name: "runner", Image: "runner:latest"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	fakeClient := setupFakeClientBuilder(scheme).
+		WithObjects(secret, nodePool, scaleSet).
+		WithStatusSubresource(scaleSet, nodePool).
+		Build()
+
+	r := &RunnerScaleSetReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+		ScaleSetFactory: &fakeScaleSetFactory{
+			fakeClient: &fakeScaleSetClient{getOrCreateErr: fmt.Errorf("github api rate limited")},
+		},
+	}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		Namespace: "default", Name: "test-gh-fail",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Listener Deployment must still be created
+	var deploy appsv1.Deployment
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-gh-fail-listener"}, &deploy); err != nil {
+		t.Fatalf("expected listener deployment to exist even when github sync fails: %v", err)
+	}
+
+	// EphemeralRunnerSet must still be created
+	var ers ghav1alpha1.EphemeralRunnerSet
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-gh-fail"}, &ers); err != nil {
+		t.Fatalf("expected EphemeralRunnerSet to exist even when github sync fails: %v", err)
+	}
+
+	// Verify status conditions
+	var updated ghav1alpha1.RunnerScaleSet
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-gh-fail"}, &updated); err != nil {
+		t.Fatalf("failed to get updated RunnerScaleSet: %v", err)
+	}
+	ghCond := conditions.GetCondition(updated.Status.Conditions, conditions.TypeGitHubReady)
+	if ghCond == nil || ghCond.Status != metav1.ConditionFalse {
+		t.Errorf("expected GitHubReady condition to be False, got %v", ghCond)
+	}
+	readyCond := conditions.GetCondition(updated.Status.Conditions, conditions.TypeReady)
+	if readyCond == nil || readyCond.Status != metav1.ConditionFalse {
+		t.Errorf("expected Ready condition to be False, got %v", readyCond)
 	}
 }
