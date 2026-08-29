@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/actions/scaleset"
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // ParseGitHubAppAuth extracts and validates GitHubAppAuth from a secret map containing GitHub App credentials.
