@@ -100,19 +100,19 @@ var _ = Describe("SHARC Operator E2E Suite", Ordered, func() {
 	AfterAll(func() {
 		By("cleaning up test namespace")
 		cmd := exec.Command("kubectl", "delete", "ns", testNamespace, "--ignore-not-found=true")
-		_ = utils.Run(cmd)
+		_, _ = utils.Run(cmd)
 
 		By("undeploying the controller-manager")
 		cmd = exec.Command("mise", "run", "undeploy")
-		_ = utils.Run(cmd)
+		_, _ = utils.Run(cmd)
 
 		By("uninstalling CRDs")
 		cmd = exec.Command("mise", "run", "uninstall")
-		_ = utils.Run(cmd)
+		_, _ = utils.Run(cmd)
 
 		By("removing manager namespace")
 		cmd = exec.Command("kubectl", "delete", "ns", namespace, "--ignore-not-found=true")
-		_ = utils.Run(cmd)
+		_, _ = utils.Run(cmd)
 	})
 
 	AfterEach(func() {
