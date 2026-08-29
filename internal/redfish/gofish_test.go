@@ -207,6 +207,20 @@ func TestGofishController_PowerOperations(t *testing.T) {
 			t.Fatalf("expected LastResetType 'ForceOff', got %q", fakeBMC.LastResetType)
 		}
 	})
+
+	t.Run("Consecutive operations do not fail due to connection reuse", func(t *testing.T) {
+		fakeBMC.PowerState = "Off"
+		fakeBMC.AllowableResetTypes = []string{"On", "GracefulShutdown", "ForceOff"}
+		if err := ctrl.PowerOn(ctx); err != nil {
+			t.Fatalf("PowerOn failed: %v", err)
+		}
+		if _, err := ctrl.GetPowerState(ctx); err != nil {
+			t.Fatalf("GetPowerState failed: %v", err)
+		}
+		if err := ctrl.GracefulShutdown(ctx); err != nil {
+			t.Fatalf("GracefulShutdown failed: %v", err)
+		}
+	})
 }
 
 func TestGofishController_ValidateSupport(t *testing.T) {

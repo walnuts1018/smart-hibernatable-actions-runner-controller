@@ -121,8 +121,7 @@ func (c *gofishController) getClientConfig() gofish.ClientConfig {
 		TLSHandshakeTimeout:   5 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
 		IdleConnTimeout:       60 * time.Second,
-		MaxIdleConns:          5,
-		MaxIdleConnsPerHost:   2,
+		DisableKeepAlives:     true,
 	}
 
 	httpClient := &http.Client{
@@ -136,7 +135,7 @@ func (c *gofishController) getClientConfig() gofish.ClientConfig {
 		Password:              c.password,
 		Insecure:              c.spec.TLS.InsecureSkipVerify,
 		BasicAuth:             true,
-		ReuseConnections:      true,
+		ReuseConnections:      false,
 		MaxConcurrentRequests: 1,
 		NoModifyTransport:     true,
 		HTTPClient:            httpClient,
@@ -569,5 +568,7 @@ func isNetworkOrEOFError(err error) bool {
 		strings.Contains(msg, "broken pipe") ||
 		strings.Contains(msg, "connection reset") ||
 		strings.Contains(msg, "connection refused") ||
-		strings.Contains(msg, "timeout")
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "no route to host") ||
+		strings.Contains(msg, "network is unreachable")
 }

@@ -548,6 +548,12 @@ func (r *RunnerMachineReconciler) reconcileQuarantineRecovery(m *ghav1alpha1.Run
 		log.Info("machine is quarantined due to MachineIDMismatch; automatic recovery is blocked (requires explicit annotation)", "machine", m.Name)
 		return
 	}
+	if m.Status.Quarantine.Reason == "PowerOnNotObserved" && (m.Status.PowerState == ghav1alpha1.PowerStateOn || m.Status.PowerState == ghav1alpha1.PowerStatePoweringOn) {
+		log.Info("clearing PowerOnNotObserved quarantine since machine power on was observed", "machine", m.Name, "powerState", m.Status.PowerState)
+		m.Status.Quarantine = nil
+		conditions.SetConditionWithGeneration(&m.Status.Conditions, m.Generation, conditions.TypeQuarantined, metav1.ConditionFalse, conditions.ReasonReady, "Machine power on observed")
+		return
+	}
 	if m.Status.Kubernetes.Ready {
 		now := metav1.Now()
 		if m.Status.Quarantine.HealthySince == nil {
