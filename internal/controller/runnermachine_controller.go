@@ -901,10 +901,8 @@ func (r *RunnerMachineReconciler) updateStatus(ctx context.Context, m, _ *ghav1a
 		if err := r.Get(ctx, client.ObjectKeyFromObject(m), &current); err != nil {
 			return err
 		}
-		orig := current.DeepCopy()
 		current.Status = m.Status
-		patch := client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{})
-		return r.Status().Patch(ctx, &current, patch)
+		return r.Status().Update(ctx, &current)
 	})
 }
 

@@ -311,10 +311,12 @@ type RunnerMachineStatus struct {
 	PowerState PowerState `json:"powerState,omitempty"`
 
 	// Operation tracks an in-progress power transition to prevent redundant API calls.
+	// +nullable
 	// +optional
 	Operation *PowerOperationStatus `json:"operation,omitempty"`
 
 	// RedfishHealth tracks BMC communication health, error backoff, and circuit breaker state.
+	// +nullable
 	// +optional
 	RedfishHealth *RedfishHealthStatus `json:"redfishHealth,omitempty"`
 
@@ -327,10 +329,12 @@ type RunnerMachineStatus struct {
 	ExternallyCordoned bool `json:"externallyCordoned"`
 
 	// Quarantine records isolation state if the machine failed node readiness or shutdown timeout.
+	// +nullable
 	// +optional
 	Quarantine *MachineQuarantineStatus `json:"quarantine,omitempty"`
 
 	// LastPowerTransitionTime is the timestamp of the last recorded power state transition.
+	// +nullable
 	// +optional
 	LastPowerTransitionTime *metav1.Time `json:"lastPowerTransitionTime,omitempty"`
 

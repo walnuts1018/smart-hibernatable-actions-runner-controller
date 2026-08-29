@@ -338,6 +338,7 @@ spec:
                 description: LastPowerTransitionTime is the timestamp of the last
                   recorded power state transition.
                 format: date-time
+                nullable: true
                 type: string
               observedGeneration:
                 description: ObservedGeneration is the most recent generation observed
@@ -347,6 +348,7 @@ spec:
               operation:
                 description: Operation tracks an in-progress power transition to prevent
                   redundant API calls.
+                nullable: true
                 properties:
                   attempts:
                     default: 1
@@ -396,6 +398,7 @@ spec:
               quarantine:
                 description: Quarantine records isolation state if the machine failed
                   node readiness or shutdown timeout.
+                nullable: true
                 properties:
                   consecutiveFailures:
                     default: 1
@@ -423,6 +426,7 @@ spec:
               redfishHealth:
                 description: RedfishHealth tracks BMC communication health, error
                   backoff, and circuit breaker state.
+                nullable: true
                 properties:
                   circuit:
                     default: Closed
