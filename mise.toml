@@ -3,7 +3,7 @@
 "go:sigs.k8s.io/controller-runtime/tools/setup-envtest" = "0.24.1"
 kustomize = "5.8.1"
 golangci-lint = "2.13.2"
-kind = "0.32.0"
+kind = "0.33.0"
 kubebuilder = "4.15.0"
 kubectl = "1.37.0"
 jq = "1.8.2"
