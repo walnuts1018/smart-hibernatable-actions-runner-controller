@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -295,6 +296,74 @@ func (c *gofishController) GetPowerState(ctx context.Context) (ghav1alpha1.Power
 	return state, nil
 }
 
+type redfishActionReset struct {
+	AllowableValues []string `json:"ResetType@Redfish.AllowableValues"`
+}
+
+type redfishAvailableAction struct {
+	Action       string `json:"Action"`
+	Capabilities []struct {
+		AllowableValues []string `json:"AllowableValues"`
+		PropertyName    string   `json:"PropertyName"`
+	} `json:"Capabilities"`
+}
+
+type redfishRawSystem struct {
+	Actions          map[string]json.RawMessage `json:"Actions"`
+	AvailableActions []redfishAvailableAction   `json:"AvailableActions"`
+}
+
+func getSupportedResetTypesFromSystem(sys *schemas.ComputerSystem) []schemas.ResetType {
+	types, err := sys.GetSupportedResetTypes()
+	if err == nil && len(types) > 0 {
+		return types
+	}
+
+	if len(sys.RawData) == 0 {
+		return nil
+	}
+
+	var raw redfishRawSystem
+	if err := json.Unmarshal(sys.RawData, &raw); err != nil {
+		return nil
+	}
+
+	var allowable []string
+	for k, v := range raw.Actions {
+		if strings.Contains(k, "ComputerSystem.Reset") {
+			var actionReset redfishActionReset
+			if err := json.Unmarshal(v, &actionReset); err == nil && len(actionReset.AllowableValues) > 0 {
+				allowable = append(allowable, actionReset.AllowableValues...)
+			}
+		}
+	}
+
+	for _, aa := range raw.AvailableActions {
+		if strings.EqualFold(aa.Action, "Reset") {
+			for _, cap := range aa.Capabilities {
+				if strings.EqualFold(cap.PropertyName, "ResetType") && len(cap.AllowableValues) > 0 {
+					allowable = append(allowable, cap.AllowableValues...)
+				}
+			}
+		}
+	}
+
+	if len(allowable) == 0 {
+		return nil
+	}
+
+	seen := make(map[schemas.ResetType]bool)
+	var result []schemas.ResetType
+	for _, a := range allowable {
+		rt := schemas.ResetType(a)
+		if !seen[rt] {
+			seen[rt] = true
+			result = append(result, rt)
+		}
+	}
+	return result
+}
+
 func (c *gofishController) PowerOn(ctx context.Context) error {
 	start := time.Now()
 	err := c.withSystem(ctx, func(sys *schemas.ComputerSystem) error {
@@ -302,10 +371,7 @@ func (c *gofishController) PowerOn(ctx context.Context) error {
 			return nil
 		}
 
-		supportedTypes, suppErr := sys.GetSupportedResetTypes()
-		if suppErr != nil {
-			supportedTypes = nil
-		}
+		supportedTypes := getSupportedResetTypesFromSystem(sys)
 
 		targetResetType := schemas.OnResetType
 		if len(supportedTypes) > 0 {
@@ -357,10 +423,7 @@ func (c *gofishController) GracefulShutdown(ctx context.Context) error {
 		}
 
 		// SupportedResetTypes (AllowableValues) を確認して最適なResetTypeを選択
-		supportedTypes, suppErr := sys.GetSupportedResetTypes()
-		if suppErr != nil {
-			supportedTypes = nil
-		}
+		supportedTypes := getSupportedResetTypesFromSystem(sys)
 		hasGraceful := false
 		hasPushButton := false
 		for _, rt := range supportedTypes {
@@ -426,7 +489,7 @@ func (c *gofishController) ForceOff(ctx context.Context) error {
 func (c *gofishController) ValidateSupport(ctx context.Context) error {
 	start := time.Now()
 	err := c.withSystem(ctx, func(sys *schemas.ComputerSystem) error {
-		supportedTypes, _ := sys.GetSupportedResetTypes()
+		supportedTypes := getSupportedResetTypesFromSystem(sys)
 		if len(supportedTypes) == 0 {
 			// If BMC doesn't advertise allowable values via ActionInfo/AllowableValues,
 			// having reached the ComputerSystem resource successfully is sufficient.
