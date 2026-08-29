@@ -42,7 +42,7 @@ func (p *orderedMachineSelector) Select(machines []MachineStatus, needsScaleUp b
 		candidates         []MachineStatus
 	)
 
-	// Phase 1: AlwaysOn, StartupRequired, or Already Active machines
+	// Phase 1: AlwaysOn or Already Active machines
 	for _, mc := range machines {
 		if mc.Quarantined || mc.Maintenance {
 			if mc.StartupRequired {
@@ -55,13 +55,7 @@ func (p *orderedMachineSelector) Select(machines []MachineStatus, needsScaleUp b
 			hasStartup = true
 		}
 
-		if mc.AlwaysOn || mc.StartupRequired {
-			selected = append(selected, mc.Machine)
-			if mc.Machine.Status.PowerState != ghav1alpha1.PowerStateOn || !mc.Ready {
-				hasStarting = true
-			}
-		} else if mc.PreviouslyDesired {
-			// Already desired active
+		if mc.AlwaysOn || mc.PreviouslyDesired {
 			selected = append(selected, mc.Machine)
 			if mc.Machine.Status.PowerState != ghav1alpha1.PowerStateOn || !mc.Ready {
 				hasStarting = true
@@ -95,9 +89,12 @@ func (p *orderedMachineSelector) Select(machines []MachineStatus, needsScaleUp b
 		}
 	}
 
-	// If we need scale-up and no machines are currently starting, select ONE candidate (Priority desc, Name asc)
+	// If we need scale-up and no machines are currently starting, select ONE candidate (StartupRequired first, then Priority desc, Name asc)
 	if len(candidates) > 0 {
 		sort.SliceStable(candidates, func(i, j int) bool {
+			if candidates[i].StartupRequired != candidates[j].StartupRequired {
+				return candidates[i].StartupRequired
+			}
 			if candidates[i].Priority != candidates[j].Priority {
 				return candidates[i].Priority > candidates[j].Priority
 			}

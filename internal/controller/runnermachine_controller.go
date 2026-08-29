@@ -77,7 +77,7 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// 2. 所属するRunnerNodePoolからDesiredStateとDrain開始時刻を取得
-	desiredState, drainStartedAt, nodePool := r.getDesiredState(ctx, &machine, &cluster)
+	desiredState, drainStartedAt, nodePool := r.getDesiredState(ctx, &machine)
 
 	// 3. Redfish BMCから最新の電源状態を観測
 	pwrCtrl := r.observeRedfish(ctx, &machine, skipRedfish)
@@ -644,29 +644,14 @@ func (r *RunnerMachineReconciler) reconcilePowerOffForRunningMachine(
 		}
 	}
 
-	// 3.4 ScaleDownDelayの確認
-	scaleDownDelay := 10 * time.Minute
-	if nodePool != nil && nodePool.Spec.Scaling.ScaleDownDelay != nil && nodePool.Spec.Scaling.ScaleDownDelay.Duration > 0 {
-		scaleDownDelay = nodePool.Spec.Scaling.ScaleDownDelay.Duration
-	}
-
-	if drainStartedAt != nil {
-		drainElapsed := time.Since(drainStartedAt.Time)
-		if drainElapsed < scaleDownDelay {
-			remaining := scaleDownDelay - drainElapsed
-			log.Info("machine scale-down delayed by ScaleDownDelay", "machine", m.Name, "remaining", remaining)
-			return 10 * time.Second
-		}
-	}
-
-	// 3.5 30秒以内の重複GracefulShutdownを抑止
+	// 3.4 30秒以内の重複GracefulShutdownを抑止
 	if m.Status.Operation != nil && m.Status.Operation.Type == ghav1alpha1.PowerOperationTypeGracefulShutdown {
 		if time.Since(m.Status.Operation.LastAttemptAt.Time) < 30*time.Second {
 			return 10 * time.Second
 		}
 	}
 
-	// 3.6 GracefulShutdownの発行
+	// 3.5 GracefulShutdownの発行
 	r.initiateGracefulShutdown(ctx, m, pwrCtrl)
 	return 10 * time.Second
 }
@@ -789,19 +774,8 @@ func (r *RunnerMachineReconciler) countActiveRunnerPodsOnNode(ctx context.Contex
 	return count, nil
 }
 
-func (r *RunnerMachineReconciler) getDesiredState(ctx context.Context, m *ghav1alpha1.RunnerMachine, cluster *ghav1alpha1.RunnerCluster) (ghav1alpha1.MachineDesiredState, *metav1.Time, *ghav1alpha1.RunnerNodePool) {
-	// 1. Startup マシン判定: クラスタがオフラインまたは起動中で、このマシンが startup.machineRefs に含まれる場合は Active
-	if cluster != nil && cluster.Spec.Startup != nil {
-		for _, sRef := range cluster.Spec.Startup.MachineRefs {
-			if sRef.Name == m.Name {
-				if !cluster.Status.APIReachable {
-					return ghav1alpha1.MachineDesiredStateActive, nil, nil
-				}
-			}
-		}
-	}
-
-	// 2. NodePoolRef から desiredState を取得
+func (r *RunnerMachineReconciler) getDesiredState(ctx context.Context, m *ghav1alpha1.RunnerMachine) (ghav1alpha1.MachineDesiredState, *metav1.Time, *ghav1alpha1.RunnerNodePool) {
+	// 1. NodePoolRef から desiredState を取得
 	if m.Spec.NodePoolRef != nil && m.Spec.NodePoolRef.Name != "" {
 		var pool ghav1alpha1.RunnerNodePool
 		if err := r.Get(ctx, client.ObjectKey{Namespace: m.Namespace, Name: m.Spec.NodePoolRef.Name}, &pool); err == nil {

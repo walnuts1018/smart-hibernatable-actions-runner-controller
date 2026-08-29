@@ -30,7 +30,43 @@ func TestOrderedMachineSelector_Select(t *testing.T) {
 				},
 			},
 			needsScaleUp: false,
-			wantSelected: []string{"m1"}, // startup required / always on stays
+			wantSelected: nil, // scale to zero: not AlwaysOn and not PreviouslyDesired
+			wantViolated: false,
+		},
+		{
+			name:            "always on machine stays selected when no scale up needed",
+			enableMultiNode: false,
+			machines: []MachineStatus{
+				{
+					Machine:   &ghav1alpha1.RunnerMachine{Name: "m1", Status: ghav1alpha1.RunnerMachineStatus{PowerState: ghav1alpha1.PowerStateOn}},
+					Priority:  100,
+					AlwaysOn:  true,
+					PoweredOn: true,
+					Ready:     true,
+				},
+			},
+			needsScaleUp: false,
+			wantSelected: []string{"m1"},
+			wantViolated: false,
+		},
+		{
+			name:            "multi-node cold start prioritizes startup node over higher priority candidate",
+			enableMultiNode: true,
+			machines: []MachineStatus{
+				{
+					Machine:         &ghav1alpha1.RunnerMachine{Name: "worker1", Status: ghav1alpha1.RunnerMachineStatus{PowerState: ghav1alpha1.PowerStateOff}},
+					Priority:        200,
+					StartupRequired: false,
+				},
+				{
+					Machine:         &ghav1alpha1.RunnerMachine{Name: "startup-node", Status: ghav1alpha1.RunnerMachineStatus{PowerState: ghav1alpha1.PowerStateOff}},
+					Priority:        100,
+					StartupRequired: true,
+				},
+			},
+			needsScaleUp: true,
+			wantSelected: []string{"startup-node"},
+			wantStarting: true,
 			wantViolated: false,
 		},
 		{

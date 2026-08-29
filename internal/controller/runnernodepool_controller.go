@@ -81,7 +81,8 @@ func (r *RunnerNodePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// 4. 各MachineのStatusを集計
 	prevDesiredMap := r.buildPrevDesiredMap(nodePool.Status.DesiredMachines)
-	machineStatuses, poweredOnCount, readyNodesCount := r.collectMachineStatuses(cluster, machineList.Items, prevDesiredMap, activeRunnersByNode)
+	hasExistingPlan := len(nodePool.Status.DesiredMachines) > 0
+	machineStatuses, poweredOnCount, readyNodesCount := r.collectMachineStatuses(cluster, machineList.Items, prevDesiredMap, hasExistingPlan, activeRunnersByNode)
 
 	nodePool.Status.PoweredOnNodes = poweredOnCount
 	nodePool.Status.ReadyNodes = readyNodesCount
@@ -316,6 +317,7 @@ func (r *RunnerNodePoolReconciler) collectMachineStatuses(
 	cluster *ghav1alpha1.RunnerCluster,
 	machines []ghav1alpha1.RunnerMachine,
 	prevDesiredMap map[string]bool,
+	hasExistingPlan bool,
 	activeRunnersByNode map[string]int,
 ) ([]capacity.MachineStatus, int32, int32) {
 	machineStatuses := make([]capacity.MachineStatus, 0, len(machines))
@@ -340,6 +342,9 @@ func (r *RunnerNodePoolReconciler) collectMachineStatuses(
 		isAlwaysOn := m.Spec.PowerPolicy == ghav1alpha1.RunnerMachinePowerPolicyAlwaysOn
 		isStartup := startupMap[m.Name]
 		wasDesired := prevDesiredMap[m.Name] || (m.UID != "" && prevDesiredMap[string(m.UID)])
+		if !hasExistingPlan && isPoweredOn {
+			wasDesired = true
+		}
 		activeCount := activeRunnersByNode[m.Spec.NodeName]
 
 		if isPoweredOn && !isQuarantined && !isMaintenance {
