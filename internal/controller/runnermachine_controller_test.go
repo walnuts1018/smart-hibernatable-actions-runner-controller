@@ -650,3 +650,254 @@ func TestRunnerMachineReconciler_RedfishCircuitBreaker(t *testing.T) {
 		t.Errorf("expected no Redfish power operations during open circuit breaker")
 	}
 }
+
+func TestRunnerMachineReconciler_PowerPolicyAlwaysOn(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = ghav1alpha1.AddToScheme(scheme)
+
+	cluster := &ghav1alpha1.RunnerCluster{
+		Name: "c1", Namespace: "default",
+		Status: ghav1alpha1.RunnerClusterStatus{APIReachable: true},
+	}
+
+	secret := &corev1.Secret{
+		Name: "redfish-secret", Namespace: "default",
+		Data: map[string][]byte{
+			"username": []byte("admin"),
+			"password": []byte("password"),
+		},
+	}
+
+	machine := &ghav1alpha1.RunnerMachine{
+		Name:      "m-always-on",
+		Namespace: "default",
+		UID:       "machine-uid-ao",
+		Spec: ghav1alpha1.RunnerMachineSpec{
+			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
+			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
+			NodeName:    "node-ao",
+			PowerPolicy: ghav1alpha1.RunnerMachinePowerPolicyAlwaysOn,
+			Redfish: ghav1alpha1.RedfishSpec{
+				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
+			},
+		},
+		Status: ghav1alpha1.RunnerMachineStatus{
+			PowerState: ghav1alpha1.PowerStateOn,
+		},
+	}
+
+	nodePool := &ghav1alpha1.RunnerNodePool{
+		Name: "p1", Namespace: "default",
+		Spec: ghav1alpha1.RunnerNodePoolSpec{
+			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
+		},
+		Status: ghav1alpha1.RunnerNodePoolStatus{
+			DesiredMachines: []ghav1alpha1.MachinePlanStatus{
+				{Name: "m-always-on", DesiredState: ghav1alpha1.MachineDesiredStateOff},
+			},
+		},
+	}
+
+	node := &corev1.Node{
+		Name: "node-ao",
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{Type: corev1.NodeReady, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cluster, secret, machine, nodePool).
+		WithStatusSubresource(machine, nodePool).
+		Build()
+
+	remoteClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(node).Build()
+	remoteProvider := &fakeRemoteProvider{client: remoteClient, node: node}
+	pwrCtrl := &fakePowerController{powerState: ghav1alpha1.PowerStateOn}
+	pwrFactory := &fakePowerControllerFactory{fakeCtrl: pwrCtrl}
+
+	r := &RunnerMachineReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RemoteProvider: remoteProvider,
+		RedfishFactory: pwrFactory,
+	}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		Namespace: "default", Name: "m-always-on",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// AlwaysOn power policy should prevent shutdown even when pool requests Off
+	if pwrCtrl.shutdownCalled || pwrCtrl.forceOffCalled {
+		t.Errorf("expected AlwaysOn machine NOT to be powered off")
+	}
+}
+
+func TestRunnerMachineReconciler_Maintenance(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = ghav1alpha1.AddToScheme(scheme)
+
+	cluster := &ghav1alpha1.RunnerCluster{
+		Name: "c1", Namespace: "default",
+		Status: ghav1alpha1.RunnerClusterStatus{APIReachable: true},
+	}
+
+	secret := &corev1.Secret{
+		Name: "redfish-secret", Namespace: "default",
+		Data: map[string][]byte{
+			"username": []byte("admin"),
+			"password": []byte("password"),
+		},
+	}
+
+	machine := &ghav1alpha1.RunnerMachine{
+		Name:      "m-maint",
+		Namespace: "default",
+		UID:       "machine-uid-maint",
+		Spec: ghav1alpha1.RunnerMachineSpec{
+			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
+			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
+			NodeName:    "node-maint",
+			Maintenance: &ghav1alpha1.MachineMaintenanceSpec{
+				Enabled: true,
+			},
+			Redfish: ghav1alpha1.RedfishSpec{
+				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
+			},
+		},
+		Status: ghav1alpha1.RunnerMachineStatus{
+			PowerState: ghav1alpha1.PowerStateOn,
+		},
+	}
+
+	node := &corev1.Node{
+		Name: "node-maint",
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{Type: corev1.NodeReady, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cluster, secret, machine).
+		WithStatusSubresource(machine).
+		Build()
+
+	remoteClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(node).Build()
+	remoteProvider := &fakeRemoteProvider{client: remoteClient, node: node}
+	pwrCtrl := &fakePowerController{powerState: ghav1alpha1.PowerStateOn}
+	pwrFactory := &fakePowerControllerFactory{fakeCtrl: pwrCtrl}
+
+	r := &RunnerMachineReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RemoteProvider: remoteProvider,
+		RedfishFactory: pwrFactory,
+	}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		Namespace: "default", Name: "m-maint",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var updatedNode corev1.Node
+	if err := remoteClient.Get(context.Background(), client.ObjectKey{Name: "node-maint"}, &updatedNode); err != nil {
+		t.Fatalf("failed to get node: %v", err)
+	}
+
+	if !updatedNode.Spec.Unschedulable {
+		t.Errorf("expected maintenance node to be cordoned (Unschedulable=true)")
+	}
+}
+
+func TestRunnerMachineReconciler_Quarantined(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = ghav1alpha1.AddToScheme(scheme)
+
+	cluster := &ghav1alpha1.RunnerCluster{
+		Name: "c1", Namespace: "default",
+		Status: ghav1alpha1.RunnerClusterStatus{APIReachable: true},
+	}
+
+	secret := &corev1.Secret{
+		Name: "redfish-secret", Namespace: "default",
+		Data: map[string][]byte{
+			"username": []byte("admin"),
+			"password": []byte("password"),
+		},
+	}
+
+	now := metav1.Now()
+	machine := &ghav1alpha1.RunnerMachine{
+		Name:      "m-quarantine",
+		Namespace: "default",
+		UID:       "machine-uid-q",
+		Spec: ghav1alpha1.RunnerMachineSpec{
+			ClusterRef:  corev1.LocalObjectReference{Name: "c1"},
+			NodePoolRef: &corev1.LocalObjectReference{Name: "p1"},
+			NodeName:    "node-q",
+			Redfish: ghav1alpha1.RedfishSpec{
+				CredentialsSecretRef: corev1.LocalObjectReference{Name: "redfish-secret"},
+			},
+		},
+		Status: ghav1alpha1.RunnerMachineStatus{
+			PowerState: ghav1alpha1.PowerStateOn,
+			Quarantine: &ghav1alpha1.MachineQuarantineStatus{
+				Reason: "Node failed to become Ready",
+				Since:  now,
+			},
+		},
+	}
+
+	nodePool := &ghav1alpha1.RunnerNodePool{
+		Name: "p1", Namespace: "default",
+		Spec: ghav1alpha1.RunnerNodePoolSpec{
+			ClusterRef: corev1.LocalObjectReference{Name: "c1"},
+		},
+		Status: ghav1alpha1.RunnerNodePoolStatus{
+			DesiredMachines: []ghav1alpha1.MachinePlanStatus{
+				{Name: "m-quarantine", DesiredState: ghav1alpha1.MachineDesiredStateOff},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cluster, secret, machine, nodePool).
+		WithStatusSubresource(machine, nodePool).
+		Build()
+
+	pwrCtrl := &fakePowerController{powerState: ghav1alpha1.PowerStateOn}
+	pwrFactory := &fakePowerControllerFactory{fakeCtrl: pwrCtrl}
+
+	r := &RunnerMachineReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RemoteProvider: &fakeRemoteProvider{},
+		RedfishFactory: pwrFactory,
+	}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		Namespace: "default", Name: "m-quarantine",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Quarantined machine should preserve power for inspection, no shutdown called
+	if pwrCtrl.shutdownCalled || pwrCtrl.forceOffCalled {
+		t.Errorf("expected quarantined machine to preserve power, but shutdown was called")
+	}
+}

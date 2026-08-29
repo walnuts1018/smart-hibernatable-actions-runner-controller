@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -84,7 +86,14 @@ func TestBuildOtlpPayload(t *testing.T) {
 
 func TestSendOtlpMetrics(t *testing.T) {
 	var receivedPayload OtlpPayload
+	attempts := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 2 {
+			// Simulate transient 500 failure
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
@@ -112,7 +121,103 @@ func TestSendOtlpMetrics(t *testing.T) {
 		t.Fatalf("unexpected error sending metrics: %v", err)
 	}
 
+	if attempts != 2 {
+		t.Errorf("expected 2 attempts with retry, got %d", attempts)
+	}
+
 	if len(receivedPayload.ResourceMetrics) != 1 {
 		t.Errorf("expected 1 resource metric received, got %d", len(receivedPayload.ResourceMetrics))
+	}
+}
+
+func TestSendOtlpMetrics_Failure(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer ts.Close()
+
+	payload := OtlpPayload{}
+	err := SendOtlpMetrics(context.Background(), ts.URL, payload)
+	if err == nil {
+		t.Fatalf("expected error on 400 Bad Request, got nil")
+	}
+}
+
+func TestParseExtraAttributes(t *testing.T) {
+	// Empty string
+	if attrs := ParseExtraAttributes(""); attrs != nil {
+		t.Errorf("expected nil for empty string, got %v", attrs)
+	}
+
+	// JSON format
+	jsonStr := `{"env":"staging","team":"infra"}`
+	expected := map[string]string{
+		"env":  "staging",
+		"team": "infra",
+	}
+	if attrs := ParseExtraAttributes(jsonStr); !reflect.DeepEqual(attrs, expected) {
+		t.Errorf("expected %v, got %v", expected, attrs)
+	}
+
+	// Comma separated format
+	csvStr := `env=staging, team=infra`
+	if attrs := ParseExtraAttributes(csvStr); !reflect.DeepEqual(attrs, expected) {
+		t.Errorf("expected %v, got %v", expected, attrs)
+	}
+}
+
+func TestPopulateMetricValues(t *testing.T) {
+	t.Setenv("GITHUB_JOB", "build-job")
+	t.Setenv("GITHUB_WORKFLOW", "build-wf")
+	t.Setenv("GITHUB_REPOSITORY", "org/repo")
+	t.Setenv("GITHUB_JOB_STATUS", "failure")
+	t.Setenv("POD_NAMESPACE", "test-ns")
+	t.Setenv("POD_NAME", "test-pod")
+	t.Setenv("NODE_NAME", "test-node")
+	t.Setenv("RUNNER_METRICS_EXTRA_ATTRIBUTES", `{"tier":"backend"}`)
+
+	mv := &MetricValues{}
+	PopulateMetricValues(mv)
+
+	if mv.JobName != "build-job" {
+		t.Errorf("expected JobName build-job, got %s", mv.JobName)
+	}
+	if mv.WorkflowName != "build-wf" {
+		t.Errorf("expected WorkflowName build-wf, got %s", mv.WorkflowName)
+	}
+	if mv.Repository != "org/repo" {
+		t.Errorf("expected Repository org/repo, got %s", mv.Repository)
+	}
+	if mv.JobResult != "failure" {
+		t.Errorf("expected JobResult failure, got %s", mv.JobResult)
+	}
+	if mv.Namespace != "test-ns" {
+		t.Errorf("expected Namespace test-ns, got %s", mv.Namespace)
+	}
+	if mv.PodName != "test-pod" {
+		t.Errorf("expected PodName test-pod, got %s", mv.PodName)
+	}
+	if mv.NodeName != "test-node" {
+		t.Errorf("expected NodeName test-node, got %s", mv.NodeName)
+	}
+	if mv.ExtraAttributes["tier"] != "backend" {
+		t.Errorf("expected ExtraAttributes tier=backend, got %v", mv.ExtraAttributes)
+	}
+
+	// Clear environment variables and test fallback to DefaultUnknownValue
+	_ = os.Unsetenv("GITHUB_JOB")
+	_ = os.Unsetenv("GITHUB_WORKFLOW")
+	_ = os.Unsetenv("GITHUB_REPOSITORY")
+
+	emptyMv := &MetricValues{}
+	PopulateMetricValues(emptyMv)
+	if emptyMv.JobName != DefaultUnknownValue {
+		t.Errorf("expected %s, got %s", DefaultUnknownValue, emptyMv.JobName)
+	}
+	if emptyMv.WorkflowName != DefaultUnknownValue {
+		t.Errorf("expected %s, got %s", DefaultUnknownValue, emptyMv.WorkflowName)
+	}
+	if emptyMv.Repository != DefaultUnknownValue {
+		t.Errorf("expected %s, got %s", DefaultUnknownValue, emptyMv.Repository)
 	}
 }

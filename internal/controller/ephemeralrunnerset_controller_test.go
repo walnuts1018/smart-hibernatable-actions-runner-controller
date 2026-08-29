@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
+	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/runner"
 )
 
 func TestEphemeralRunnerSetReconciler_ScaleUpAndDown(t *testing.T) {
@@ -23,6 +24,9 @@ func TestEphemeralRunnerSetReconciler_ScaleUpAndDown(t *testing.T) {
 	ers := &ghav1alpha1.EphemeralRunnerSet{
 		Name:      "test-ss",
 		Namespace: "default",
+		Labels: map[string]string{
+			runner.LabelScaleSetUID: "scale-set-uid-12345",
+		},
 		Spec: ghav1alpha1.EphemeralRunnerSetSpec{
 			ScaleSetRef: corev1.LocalObjectReference{Name: "test-ss"},
 			Replicas:    &two,
@@ -45,7 +49,7 @@ func TestEphemeralRunnerSetReconciler_ScaleUpAndDown(t *testing.T) {
 		Scheme: scheme,
 	}
 
-	// 1. Scale Up: replicas=2 -> 2 EphemeralRunners created
+	// 1. Scale Up: replicas=2 -> 2 EphemeralRunners created with inherited scaleSetUID label
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
 		Namespace: "default", Name: "test-ss",
 	})
@@ -60,6 +64,12 @@ func TestEphemeralRunnerSetReconciler_ScaleUpAndDown(t *testing.T) {
 
 	if len(runners.Items) != 2 {
 		t.Fatalf("expected 2 EphemeralRunners created, got %d", len(runners.Items))
+	}
+
+	for _, run := range runners.Items {
+		if run.Labels[runner.LabelScaleSetUID] != "scale-set-uid-12345" {
+			t.Errorf("expected inherited LabelScaleSetUID 'scale-set-uid-12345', got %q", run.Labels[runner.LabelScaleSetUID])
+		}
 	}
 
 	// 2. Scale Down: replicas=1 -> 1 runner deleted

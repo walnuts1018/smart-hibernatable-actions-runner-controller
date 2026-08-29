@@ -56,11 +56,12 @@ func setupFakeClientBuilder(scheme *runtime.Scheme) *fake.ClientBuilder {
 }
 
 type fakeRemoteProvider struct {
-	client    client.Client
-	healthErr error
-	node      *corev1.Node
-	nodeErr   error
-	err       error
+	client     client.Client
+	healthErr  error
+	node       *corev1.Node
+	nodeErr    error
+	clusterUID string
+	err        error
 }
 
 func (f *fakeRemoteProvider) GetClient(ctx context.Context, cluster *ghav1alpha1.RunnerCluster) (client.Client, error) {
@@ -90,6 +91,9 @@ func (f *fakeRemoteProvider) GetNode(ctx context.Context, cluster *ghav1alpha1.R
 func (f *fakeRemoteProvider) GetClusterUID(ctx context.Context, cluster *ghav1alpha1.RunnerCluster) (string, error) {
 	if f.err != nil {
 		return "", f.err
+	}
+	if f.clusterUID != "" {
+		return f.clusterUID, nil
 	}
 	return "fake-cluster-uid", nil
 }

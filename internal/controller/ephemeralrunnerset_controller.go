@@ -72,70 +72,14 @@ func (r *EphemeralRunnerSetReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	// 2. スケールアップ (target > active)
 	if targetReplicas > int32(len(activeRunners)) {
-		diff := targetReplicas - int32(len(activeRunners))
-		log.Info("scaling up EphemeralRunners", "count", diff, "scaleSet", ers.Spec.ScaleSetRef.Name)
-		if r.Recorder != nil {
-			r.Recorder.Eventf(&ers, nil, corev1.EventTypeNormal, "ScalingUp", "Reconcile", "Scaling up %d ephemeral runner(s) (target: %d, active: %d)", diff, targetReplicas, len(activeRunners))
-		}
-		for range diff {
-			runnerName := runner.GenerateRunnerName(ers.Spec.ScaleSetRef.Name)
-			newRunner := &ghav1alpha1.EphemeralRunner{
-				Name:      runnerName,
-				Namespace: ers.Namespace,
-				Labels: map[string]string{
-					runner.LabelManagedBy:    runner.LabelManagedByValue,
-					runner.LabelScaleSetName: ers.Spec.ScaleSetRef.Name,
-				},
-				Spec: ghav1alpha1.EphemeralRunnerSpec{
-					ScaleSetRef: corev1.LocalObjectReference{
-						Name: ers.Spec.ScaleSetRef.Name,
-					},
-					RunnerName: runnerName,
-				},
-				Status: ghav1alpha1.EphemeralRunnerStatus{
-					Phase: ghav1alpha1.EphemeralRunnerPhasePending,
-				},
-			}
-
-			if err := controllerutil.SetControllerReference(&ers, newRunner, r.Scheme); err != nil {
-				log.Error(err, "failed to set controller reference on runner", "runner", runnerName)
-				continue
-			}
-
-			if err := r.Create(ctx, newRunner); err != nil {
-				log.Error(err, "failed to create EphemeralRunner", "runner", runnerName)
-				continue
-			}
-			log.Info("created EphemeralRunner", "runner", runnerName)
-		}
+		r.scaleUp(ctx, &ers, targetReplicas, int32(len(activeRunners)))
 	}
 
 	// 3. スケールダウン (target < active)
 	// アイドルまたは未起動の Runner から優先してスケールダウン
 	hasUnresolvedExcess := false
 	if targetReplicas < int32(len(activeRunners)) {
-		excess := int32(len(activeRunners)) - targetReplicas
-		log.Info("scaling down EphemeralRunners", "excess", excess, "target", targetReplicas, "active", len(activeRunners))
-		for _, run := range activeRunners {
-			if excess <= 0 {
-				break
-			}
-			if run.DeletionTimestamp.IsZero() && (run.Status.Phase == ghav1alpha1.EphemeralRunnerPhasePending ||
-				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseWaitingForCluster ||
-				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseProvisioning ||
-				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseStarting ||
-				run.Status.Phase == ghav1alpha1.EphemeralRunnerPhaseIdle ||
-				run.Status.Phase == "") {
-				if err := r.Delete(ctx, run); err != nil {
-					log.Error(err, "failed to delete EphemeralRunner for scale-down", "runner", run.Name)
-				} else {
-					excess--
-				}
-			}
-		}
-		if excess > 0 {
-			hasUnresolvedExcess = true
-		}
+		hasUnresolvedExcess = r.scaleDown(ctx, activeRunners, int32(len(activeRunners))-targetReplicas)
 	}
 
 	// 4. Conditions 更新
@@ -156,6 +100,88 @@ func (r *EphemeralRunnerSetReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
+func (r *EphemeralRunnerSetReconciler) scaleUp(ctx context.Context, ers *ghav1alpha1.EphemeralRunnerSet, targetReplicas, activeCount int32) {
+	log := logf.FromContext(ctx)
+	diff := targetReplicas - activeCount
+	log.Info("scaling up EphemeralRunners", "count", diff, "scaleSet", ers.Spec.ScaleSetRef.Name)
+	if r.Recorder != nil {
+		r.Recorder.Eventf(ers, nil, corev1.EventTypeNormal, "ScalingUp", "Reconcile", "Scaling up %d ephemeral runner(s) (target: %d, active: %d)", diff, targetReplicas, activeCount)
+	}
+	for range diff {
+		runnerName := runner.GenerateRunnerName(ers.Spec.ScaleSetRef.Name)
+		labels := map[string]string{
+			runner.LabelManagedBy:    runner.LabelManagedByValue,
+			runner.LabelScaleSetName: ers.Spec.ScaleSetRef.Name,
+		}
+		if ers.Labels != nil && ers.Labels[runner.LabelScaleSetUID] != "" {
+			labels[runner.LabelScaleSetUID] = ers.Labels[runner.LabelScaleSetUID]
+		}
+
+		newRunner := &ghav1alpha1.EphemeralRunner{
+			Name:      runnerName,
+			Namespace: ers.Namespace,
+			Labels:    labels,
+			Spec: ghav1alpha1.EphemeralRunnerSpec{
+				ScaleSetRef: corev1.LocalObjectReference{
+					Name: ers.Spec.ScaleSetRef.Name,
+				},
+				RunnerName: runnerName,
+			},
+			Status: ghav1alpha1.EphemeralRunnerStatus{
+				Phase: ghav1alpha1.EphemeralRunnerPhasePending,
+			},
+		}
+
+		if err := controllerutil.SetControllerReference(ers, newRunner, r.Scheme); err != nil {
+			log.Error(err, "failed to set controller reference on runner", "runner", runnerName)
+			continue
+		}
+
+		if err := r.Create(ctx, newRunner); err != nil {
+			log.Error(err, "failed to create EphemeralRunner", "runner", runnerName)
+			continue
+		}
+		log.Info("created EphemeralRunner", "runner", runnerName)
+	}
+}
+
+func (r *EphemeralRunnerSetReconciler) scaleDown(ctx context.Context, activeRunners []*ghav1alpha1.EphemeralRunner, excess int32) bool {
+	log := logf.FromContext(ctx)
+	log.Info("scaling down EphemeralRunners", "excess", excess)
+	for _, run := range activeRunners {
+		if excess <= 0 {
+			break
+		}
+		if run.DeletionTimestamp.IsZero() && isRunnerEligibleForScaleDown(run.Status.Phase) {
+			if err := r.Delete(ctx, run); err != nil {
+				log.Error(err, "failed to delete EphemeralRunner for scale-down", "runner", run.Name)
+			} else {
+				excess--
+			}
+		}
+	}
+	return excess > 0
+}
+
+func isRunnerEligibleForScaleDown(phase ghav1alpha1.EphemeralRunnerPhase) bool {
+	switch phase {
+	case "",
+		ghav1alpha1.EphemeralRunnerPhasePending,
+		ghav1alpha1.EphemeralRunnerPhaseWaitingForCluster,
+		ghav1alpha1.EphemeralRunnerPhaseProvisioning,
+		ghav1alpha1.EphemeralRunnerPhaseStarting,
+		ghav1alpha1.EphemeralRunnerPhaseIdle:
+		return true
+	case ghav1alpha1.EphemeralRunnerPhaseBusy,
+		ghav1alpha1.EphemeralRunnerPhaseCompleted,
+		ghav1alpha1.EphemeralRunnerPhaseFailed,
+		ghav1alpha1.EphemeralRunnerPhaseDeleting:
+		return false
+	default:
+		return false
+	}
 }
 
 func (r *EphemeralRunnerSetReconciler) updateStatus(ctx context.Context, ers, _ *ghav1alpha1.EphemeralRunnerSet) error {

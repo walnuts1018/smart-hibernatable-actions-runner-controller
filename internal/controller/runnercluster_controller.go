@@ -185,7 +185,7 @@ func (r *RunnerClusterReconciler) checkClusterHealth(ctx context.Context, cluste
 	} else if hasTransitioningMachine {
 		cluster.Status.Phase = ghav1alpha1.RunnerClusterPhaseStarting
 		conditions.SetConditionWithGeneration(&cluster.Status.Conditions, cluster.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonPowerTransitioning, "Runner machines are starting or waiting for API readiness")
-	} else {
+	} else if cond := conditions.GetCondition(cluster.Status.Conditions, conditions.TypeReady); cond == nil || cond.Reason != conditions.ReasonClusterIdentityMismatch {
 		cluster.Status.Phase = ghav1alpha1.RunnerClusterPhaseDegraded
 		conditions.SetConditionWithGeneration(&cluster.Status.Conditions, cluster.Generation, conditions.TypeReady, metav1.ConditionFalse, conditions.ReasonNotReady, "Runner cluster is degraded (machine is on but API is unreachable)")
 	}

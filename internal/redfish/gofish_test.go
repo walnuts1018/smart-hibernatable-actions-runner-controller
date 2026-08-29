@@ -290,3 +290,61 @@ func TestGofishController_ValidateSupport(t *testing.T) {
 		}
 	})
 }
+
+func TestGofishController_AllPowerStates(t *testing.T) {
+	fakeBMC := utils.NewFakeRedfishServer("PoweringOn")
+	defer fakeBMC.Close()
+
+	ctx := context.Background()
+	spec := ghav1alpha1.RedfishSpec{
+		Endpoint: fakeBMC.URL(),
+		SystemID: "1",
+		TLS: ghav1alpha1.RedfishTLSSpec{
+			InsecureSkipVerify: true,
+		},
+	}
+	factory := NewGofishControllerFactory()
+	ctrl, err := factory.NewController(spec, "user", "pass", nil)
+	if err != nil {
+		t.Fatalf("failed to create controller from factory: %v", err)
+	}
+
+	// 1. PoweringOn
+	state, err := ctrl.GetPowerState(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != ghav1alpha1.PowerStatePoweringOn {
+		t.Errorf("expected PoweringOn, got %v", state)
+	}
+
+	// 2. PoweringOff
+	fakeBMC.PowerState = "PoweringOff"
+	state, err = ctrl.GetPowerState(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != ghav1alpha1.PowerStatePoweringOff {
+		t.Errorf("expected PoweringOff, got %v", state)
+	}
+
+	// 3. Paused
+	fakeBMC.PowerState = "Paused"
+	state, err = ctrl.GetPowerState(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != ghav1alpha1.PowerStateUnknown {
+		t.Errorf("expected Unknown for Paused state, got %v", state)
+	}
+
+	// 4. Unknown
+	fakeBMC.PowerState = "SomeUnknownState"
+	state, err = ctrl.GetPowerState(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != ghav1alpha1.PowerStateUnknown {
+		t.Errorf("expected Unknown, got %v", state)
+	}
+}

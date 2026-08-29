@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestExtractJobDisplayName(t *testing.T) {
@@ -42,5 +43,58 @@ func TestExtractJobDisplayName(t *testing.T) {
 	name3 := ExtractJobDisplayName("", "my-fallback-job")
 	if name3 != "my-fallback-job" {
 		t.Errorf("expected 'my-fallback-job', got %q", name3)
+	}
+
+	// 4. Missing file fallback
+	name4 := ExtractJobDisplayName(filepath.Join(tmpDir, "non-existent.log"), "fallback")
+	if name4 != "fallback" {
+		t.Errorf("expected 'fallback', got %q", name4)
+	}
+
+	// 5. Missing fallback and missing file returns DefaultUnknownValue
+	name5 := ExtractJobDisplayName("", "")
+	if name5 != DefaultUnknownValue {
+		t.Errorf("expected '%s', got %q", DefaultUnknownValue, name5)
+	}
+}
+
+func TestFindLatestWorkerLog(t *testing.T) {
+	tmpDir := t.TempDir()
+	diagDir := filepath.Join(tmpDir, "_diag")
+	if err := os.MkdirAll(diagDir, 0755); err != nil {
+		t.Fatalf("failed to create diag dir: %v", err)
+	}
+
+	t.Setenv("RUNNER_WORKSPACE", filepath.Join(tmpDir, "_work"))
+
+	// Initially no log files
+	found := FindLatestWorkerLog()
+	if found != "" {
+		t.Errorf("expected empty string when no logs exist, got %q", found)
+	}
+
+	// Create older log file
+	log1 := filepath.Join(diagDir, "Worker_1.log")
+	if err := os.WriteFile(log1, []byte("old log"), 0644); err != nil {
+		t.Fatalf("failed to write log1: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	// Create newer log file
+	log2 := filepath.Join(diagDir, "Worker_2.log")
+	if err := os.WriteFile(log2, []byte("newer log"), 0644); err != nil {
+		t.Fatalf("failed to write log2: %v", err)
+	}
+
+	// Create non-matching file
+	otherFile := filepath.Join(diagDir, "Runner_1.log")
+	if err := os.WriteFile(otherFile, []byte("runner log"), 0644); err != nil {
+		t.Fatalf("failed to write otherFile: %v", err)
+	}
+
+	found = FindLatestWorkerLog()
+	if found != log2 {
+		t.Errorf("expected latest log %q, got %q", log2, found)
 	}
 }

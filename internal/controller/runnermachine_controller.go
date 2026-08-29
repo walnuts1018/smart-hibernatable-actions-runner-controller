@@ -228,9 +228,16 @@ func (r *RunnerMachineReconciler) observeRemoteNode(
 		if err := r.Status().Patch(ctx, machine, client.MergeFrom(origMachine)); err != nil {
 			return nil, nil, err
 		}
-		delete(machine.Annotations, runner.AnnotationAdoptMachineID)
-		if err := r.Update(ctx, machine); err != nil {
-			return nil, nil, err
+		updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			var current ghav1alpha1.RunnerMachine
+			if err := r.Get(ctx, client.ObjectKeyFromObject(machine), &current); err != nil {
+				return err
+			}
+			delete(current.Annotations, runner.AnnotationAdoptMachineID)
+			return r.Update(ctx, &current)
+		})
+		if updateErr != nil {
+			return nil, nil, updateErr
 		}
 		res := ctrl.Result{RequeueAfter: 1 * time.Second}
 		return nil, &res, nil

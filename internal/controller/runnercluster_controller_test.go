@@ -12,12 +12,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	ghav1alpha1 "github.com/walnuts1018/smart-hibernatable-actions-runner-controller/api/v1alpha1"
+	"github.com/walnuts1018/smart-hibernatable-actions-runner-controller/internal/conditions"
 )
 
 func TestRunnerClusterReconciler(t *testing.T) {
 	scheme := runtime.NewScheme()
-	clientgoscheme.AddToScheme(scheme)
-	ghav1alpha1.AddToScheme(scheme)
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name:      "test-cluster",
@@ -73,8 +74,8 @@ func TestRunnerClusterReconciler(t *testing.T) {
 
 func TestRunnerClusterReconciler_ShortCircuitOffline(t *testing.T) {
 	scheme := runtime.NewScheme()
-	clientgoscheme.AddToScheme(scheme)
-	ghav1alpha1.AddToScheme(scheme)
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = ghav1alpha1.AddToScheme(scheme)
 
 	cluster := &ghav1alpha1.RunnerCluster{
 		Name:      "test-cluster",
@@ -152,8 +153,8 @@ func TestRunnerClusterReconciler_Phases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			scheme := runtime.NewScheme()
-			clientgoscheme.AddToScheme(scheme)
-			ghav1alpha1.AddToScheme(scheme)
+			_ = clientgoscheme.AddToScheme(scheme)
+			_ = ghav1alpha1.AddToScheme(scheme)
 
 			cluster := &ghav1alpha1.RunnerCluster{
 				Name: "c1", Namespace: "default",
@@ -193,5 +194,106 @@ func TestRunnerClusterReconciler_Phases(t *testing.T) {
 				t.Errorf("expected phase %s, got %s", tt.expectedPhase, updated.Status.Phase)
 			}
 		})
+	}
+}
+
+func TestRunnerClusterReconciler_ClusterIdentityMismatchAndAdoption(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = ghav1alpha1.AddToScheme(scheme)
+
+	cluster := &ghav1alpha1.RunnerCluster{
+		Name:      "id-cluster",
+		Namespace: "default",
+		Status: ghav1alpha1.RunnerClusterStatus{
+			ClusterUID: "original-uid-123",
+		},
+	}
+
+	machine := &ghav1alpha1.RunnerMachine{
+		Name:      "m1",
+		Namespace: "default",
+		Spec: ghav1alpha1.RunnerMachineSpec{
+			ClusterRef: corev1.LocalObjectReference{Name: "id-cluster"},
+		},
+		Status: ghav1alpha1.RunnerMachineStatus{
+			PowerState: ghav1alpha1.PowerStateOn,
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster, machine).WithStatusSubresource(cluster, machine).Build()
+	remoteProvider := &fakeRemoteProvider{clusterUID: "changed-uid-456"}
+
+	r := &RunnerClusterReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RemoteProvider: remoteProvider,
+	}
+
+	// 1. Mismatch check: Degraded and Condition ClusterIdentityMismatch set
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		Namespace: "default", Name: "id-cluster",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var checkCluster ghav1alpha1.RunnerCluster
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "id-cluster"}, &checkCluster); err != nil {
+		t.Fatalf("failed to get cluster: %v", err)
+	}
+
+	if checkCluster.Status.Phase != ghav1alpha1.RunnerClusterPhaseDegraded {
+		t.Errorf("expected phase Degraded on UID mismatch, got %s", checkCluster.Status.Phase)
+	}
+	cond := conditions.GetCondition(checkCluster.Status.Conditions, conditions.TypeReady)
+	if cond == nil || cond.Reason != conditions.ReasonClusterIdentityMismatch {
+		t.Errorf("expected Reason %s, got %v", conditions.ReasonClusterIdentityMismatch, cond)
+	}
+
+	// 2. Explicit Adoption: spec.identity.expectedClusterUID is set to changed-uid-456
+	checkCluster.Spec.Identity = &ghav1alpha1.RunnerClusterIdentitySpec{
+		ExpectedClusterUID: "changed-uid-456",
+	}
+	_ = fakeClient.Update(context.Background(), &checkCluster)
+
+	_, err = r.Reconcile(context.Background(), ctrl.Request{
+		Namespace: "default", Name: "id-cluster",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "id-cluster"}, &checkCluster); err != nil {
+		t.Fatalf("failed to get cluster: %v", err)
+	}
+
+	if checkCluster.Status.ClusterUID != "changed-uid-456" {
+		t.Errorf("expected adopted ClusterUID 'changed-uid-456', got %s", checkCluster.Status.ClusterUID)
+	}
+	if checkCluster.Status.Phase != ghav1alpha1.RunnerClusterPhaseReady {
+		t.Errorf("expected phase Ready after adoption, got %s", checkCluster.Status.Phase)
+	}
+}
+
+func TestRunnerClusterReconciler_FindClustersForMachine(t *testing.T) {
+	r := &RunnerClusterReconciler{}
+	m := &ghav1alpha1.RunnerMachine{
+		Namespace: "default",
+		Name:      "m1",
+		Spec: ghav1alpha1.RunnerMachineSpec{
+			ClusterRef: corev1.LocalObjectReference{Name: "target-cluster"},
+		},
+	}
+
+	reqs := r.findClustersForMachine(context.Background(), m)
+	if len(reqs) != 1 || reqs[0].Name != "target-cluster" || reqs[0].Namespace != "default" {
+		t.Errorf("expected request for default/target-cluster, got %v", reqs)
+	}
+
+	// Non-RunnerMachine object
+	reqs2 := r.findClustersForMachine(context.Background(), &corev1.Pod{})
+	if len(reqs2) != 0 {
+		t.Errorf("expected 0 requests for non-RunnerMachine, got %d", len(reqs2))
 	}
 }

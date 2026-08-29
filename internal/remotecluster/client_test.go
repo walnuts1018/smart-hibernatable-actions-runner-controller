@@ -291,3 +291,139 @@ func TestProvider_InsecureSkipTLSVerify(t *testing.T) {
 		t.Fatalf("expected CheckHealth to succeed when InsecureSkipTLSVerify is true, got: %v", err)
 	}
 }
+
+func TestIsNodeReady(t *testing.T) {
+	// Nil node
+	if IsNodeReady(nil) {
+		t.Errorf("expected false for nil node")
+	}
+
+	// Node without conditions
+	nodeWithoutConds := &corev1.Node{}
+	if IsNodeReady(nodeWithoutConds) {
+		t.Errorf("expected false for node without conditions")
+	}
+
+	// Node with Ready=False
+	nodeNotReady := &corev1.Node{
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{Type: corev1.NodeReady, Status: corev1.ConditionFalse},
+			},
+		},
+	}
+	if IsNodeReady(nodeNotReady) {
+		t.Errorf("expected false for node with Ready=False")
+	}
+
+	// Node with Ready=True
+	nodeReady := &corev1.Node{
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{Type: corev1.NodeReady, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	if !IsNodeReady(nodeReady) {
+		t.Errorf("expected true for node with Ready=True")
+	}
+}
+
+func TestProvider_InvalidateCache(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = ghav1alpha1.AddToScheme(scheme)
+
+	localClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	provider := NewProvider(localClient, scheme)
+
+	// Invalidate non-cached key should not panic
+	provider.InvalidateCache(client.ObjectKey{Namespace: "default", Name: "cluster-1"})
+}
+
+func TestProvider_GetNodeAndClusterUID(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = ghav1alpha1.AddToScheme(scheme)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"versions":["v1"]}`))
+		case "/api/v1":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"resources": [
+					{"name": "nodes", "namespaced": false, "kind": "Node"},
+					{"name": "namespaces", "namespaced": false, "kind": "Namespace"}
+				]
+			}`))
+		case "/api/v1/nodes/node-1":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"apiVersion":"v1","kind":"Node","metadata":{"name":"node-1"}}`))
+		case "/api/v1/nodes/missing-node":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"apiVersion":"v1","kind":"Status","status":"Failure","reason":"NotFound","code":404}`))
+		case "/api/v1/namespaces/kube-system":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"kube-system","uid":"uid-kube-system-12345"}}`))
+		default:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"major":"1","minor":"28"}`))
+		}
+	}))
+	defer server.Close()
+
+	secret := &corev1.Secret{
+		Namespace:       "test-ns",
+		Name:            "remote-kubeconfig",
+		ResourceVersion: "1",
+		Data: map[string][]byte{
+			"kubeconfig": makeKubeconfig(server.URL),
+		},
+	}
+
+	localClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
+	provider := NewProvider(localClient, scheme)
+
+	cluster := &ghav1alpha1.RunnerCluster{
+		Namespace: "test-ns",
+		Name:      "test-cluster",
+		Spec: ghav1alpha1.RunnerClusterSpec{
+			KubeconfigSecretRef: corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{
+					Name: "remote-kubeconfig",
+				},
+			},
+		},
+	}
+
+	// 1. GetNode for existing node
+	node, err := provider.GetNode(t.Context(), cluster, "node-1")
+	if err != nil {
+		t.Fatalf("unexpected error getting node: %v", err)
+	}
+	if node == nil || node.Name != "node-1" {
+		t.Errorf("expected node-1, got %v", node)
+	}
+
+	// 2. GetNode for missing node (returns nil, nil)
+	missingNode, err := provider.GetNode(t.Context(), cluster, "missing-node")
+	if err != nil {
+		t.Fatalf("unexpected error getting missing node: %v", err)
+	}
+	if missingNode != nil {
+		t.Errorf("expected nil for missing node, got %v", missingNode)
+	}
+
+	// 3. GetClusterUID
+	uid, err := provider.GetClusterUID(t.Context(), cluster)
+	if err != nil {
+		t.Fatalf("unexpected error getting cluster UID: %v", err)
+	}
+	if uid != "uid-kube-system-12345" {
+		t.Errorf("expected UID 'uid-kube-system-12345', got %q", uid)
+	}
+}
