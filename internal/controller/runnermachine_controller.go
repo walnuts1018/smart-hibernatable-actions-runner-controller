@@ -91,7 +91,10 @@ func (r *RunnerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return *earlyResult, nil
 	}
 
-	// 5. メンテナンスモードまたはDesiredStateに応じた電源操作・Cordon制御
+	// 5. Quarantine安定化判定・回復判定
+	r.reconcileQuarantineRecovery(&machine)
+
+	// 6. メンテナンスモードまたはDesiredStateに応じた電源操作・Cordon制御
 	requeueAfter := 30 * time.Second
 	if machine.Spec.Maintenance != nil && machine.Spec.Maintenance.Enabled {
 		requeueAfter = r.reconcileMaintenance(ctx, &machine, &cluster, remoteNode, pwrCtrl)
@@ -514,9 +517,6 @@ func (r *RunnerMachineReconciler) reconcileActive(
 
 	// 4. 電源ONかつNodeがReadyなら、自身が設定したCordonのみ解除（外部Cordonは保護）
 	r.ensureUncordonIfReady(ctx, m, cluster, remoteNode)
-
-	// 5. Quarantine安定化判定: Nodeが10分間継続してReadyならQuarantine解除
-	r.reconcileQuarantineRecovery(m)
 
 	return 30 * time.Second
 }
