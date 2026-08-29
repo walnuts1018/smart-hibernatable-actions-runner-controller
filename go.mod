@@ -10,7 +10,7 @@ require (
 	github.com/onsi/gomega v1.43.0
 	github.com/phsym/console-slog v0.3.1
 	github.com/prometheus/client_golang v1.24.1
-	github.com/stmcginnis/gofish v0.24.0
+	github.com/stmcginnis/gofish v0.25.0
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.46.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.46.0
