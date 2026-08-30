@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -146,7 +147,7 @@ func (s *ScalerHandler) HandleJobCompleted(ctx context.Context, jobInfo *scalese
 		epRunner.Status.GitHub.CompletedObservedAt = &now
 		epRunner.Status.GitHub.CompletedResult = jobInfo.Result
 
-		if jobInfo.Result == "success" {
+		if strings.EqualFold(jobInfo.Result, "success") || strings.EqualFold(jobInfo.Result, "succeeded") {
 			epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseCompleted
 		} else {
 			epRunner.Status.Phase = ghav1alpha1.EphemeralRunnerPhaseFailed

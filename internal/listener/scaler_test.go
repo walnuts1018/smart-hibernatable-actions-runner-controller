@@ -131,7 +131,7 @@ func TestScalerHandler_HandleJobStartedAndCompleted(t *testing.T) {
 
 	jobCompleted := &scaleset.JobCompleted{}
 	jobCompleted.RunnerName = "runner-1"
-	jobCompleted.Result = "success"
+	jobCompleted.Result = "succeeded"
 
 	if err := scaler.HandleJobCompleted(context.Background(), jobCompleted); err != nil {
 		t.Fatalf("unexpected error on job completed: %v", err)
@@ -142,9 +142,26 @@ func TestScalerHandler_HandleJobStartedAndCompleted(t *testing.T) {
 	}
 
 	if updatedRunner.Status.Phase != ghav1alpha1.EphemeralRunnerPhaseCompleted {
-		t.Errorf("expected phase Completed, got %v", updatedRunner.Status.Phase)
+		t.Errorf("expected phase Completed for 'succeeded', got %v", updatedRunner.Status.Phase)
 	}
 	if !updatedRunner.Status.GitHub.CompletedObserved {
 		t.Errorf("expected completedObserved true, got %v", updatedRunner.Status.GitHub.CompletedObserved)
+	}
+
+	// Test failed result
+	jobFailed := &scaleset.JobCompleted{}
+	jobFailed.RunnerName = "runner-1"
+	jobFailed.Result = "failed"
+
+	if err := scaler.HandleJobCompleted(context.Background(), jobFailed); err != nil {
+		t.Fatalf("unexpected error on job failed: %v", err)
+	}
+
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "runner-1"}, &updatedRunner); err != nil {
+		t.Fatalf("failed to get runner: %v", err)
+	}
+
+	if updatedRunner.Status.Phase != ghav1alpha1.EphemeralRunnerPhaseFailed {
+		t.Errorf("expected phase Failed for 'failed', got %v", updatedRunner.Status.Phase)
 	}
 }
