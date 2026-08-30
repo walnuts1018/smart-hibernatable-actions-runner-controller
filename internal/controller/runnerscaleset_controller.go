@@ -560,7 +560,7 @@ func (r *RunnerScaleSetReconciler) buildListenerContainer(ss *ghav1alpha1.Runner
 		}
 	}
 
-	if ss.Spec.Listener.Resources.Limits != nil || ss.Spec.Listener.Resources.Requests != nil {
+	if ss.Spec.Listener.Resources != nil && (ss.Spec.Listener.Resources.Limits != nil || ss.Spec.Listener.Resources.Requests != nil) {
 		resApply := corev1apply.ResourceRequirements()
 		if ss.Spec.Listener.Resources.Limits != nil {
 			resApply = resApply.WithLimits(ss.Spec.Listener.Resources.Limits)

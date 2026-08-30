@@ -1444,6 +1444,7 @@ spec:
                   resources:
                     description: Resources defines resource requests and limits for
                       the listener container.
+                    nullable: true
                     properties:
                       claims:
                         description: |-
@@ -2174,6 +2175,7 @@ spec:
                       resources:
                         description: Resources defines resource requests and limits
                           for the dind container.
+                        nullable: true
                         properties:
                           claims:
                             description: |-

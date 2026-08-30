@@ -257,7 +257,9 @@ func buildDindContainer(runnerSpec *ghav1alpha1.RunnerTemplateSpec) corev1.Conta
 		if runnerSpec.DinD.DockerGroupGID != "" {
 			groupGID = runnerSpec.DinD.DockerGroupGID
 		}
-		dindRes = runnerSpec.DinD.Resources
+		if runnerSpec.DinD.Resources != nil {
+			dindRes = *runnerSpec.DinD.Resources
+		}
 		dindArgs = runnerSpec.DinD.Args
 		dindEnv = append([]corev1.EnvVar{}, runnerSpec.DinD.Env...)
 		dindSecCtx = runnerSpec.DinD.SecurityContext

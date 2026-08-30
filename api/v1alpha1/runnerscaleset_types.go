@@ -80,8 +80,9 @@ type DinDSpec struct {
 	Image string `json:"image,omitempty"`
 
 	// Resources defines resource requests and limits for the dind container.
+	// +nullable
 	// +optional
-	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 
 	// DockerGroupGID is the GID of the docker group (default: "123").
 	// +kubebuilder:default="123"
@@ -129,8 +130,9 @@ type RunnerTemplateSpec struct {
 // ListenerSpec defines configuration for the runner scale set listener deployment.
 type ListenerSpec struct {
 	// Resources defines resource requests and limits for the listener container.
+	// +nullable
 	// +optional
-	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 
 	// NodeSelector is a selector which must be true for the listener pod to fit on a node.
 	// +optional
