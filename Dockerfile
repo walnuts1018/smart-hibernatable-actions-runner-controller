@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM --platform=$BUILDPLATFORM docker.io/golang:1.27.3-trixie AS go-deps
+FROM --platform=$BUILDPLATFORM docker.io/golang:1.27.3-trixie@sha256:af1bfc2614ebb1dbd31af514b78740fd678850e76498762b425ecee4c5c6ea80 AS go-deps
 
 ENV GOTOOLCHAIN=local
 
