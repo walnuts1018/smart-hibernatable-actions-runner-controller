@@ -47,7 +47,7 @@ RUN --mount=type=bind,source=.,target=/src \
     -o /out/runner-hook \
     ./cmd/runner-hook/main.go
 
-FROM gcr.io/distroless/static-debian13:nonroot AS static-runtime
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5 AS static-runtime
 
 WORKDIR /
 
